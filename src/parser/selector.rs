@@ -1,18 +1,25 @@
 use nom::IResult;
 use nom::branch::alt;
-use nom::sequence::{tuple, pair};
-use nom::combinator::opt;
+use nom::sequence::{tuple, pair, preceded};
+use nom::combinator::{opt, map};
 use nom::character::complete::alpha1;
-use crate::grammar::{Selector, SelectorChild, TypeSelector};
 use nom::bytes::complete::tag;
 use nom::multi::many1;
+use crate::grammar::{Selector, SelectorChild, TypeSelector, ClassSelector};
 
 pub fn selector(input: &str) -> IResult<&str, Selector> {
     many1(selector_child)(input).map(|(i, o)| (i, Selector { children: o }))
 }
 
 fn selector_child(input: &str) -> IResult<&str, SelectorChild> {
-    type_selector(input).map(|(i, o)| (i, SelectorChild::TypeSelector(o)))
+    alt((
+        map(class_selector, |o| SelectorChild::ClassSelector(o)),
+        map(type_selector, |o| SelectorChild::TypeSelector(o)),
+    ))(input)
+}
+
+fn class_selector(input: &str) -> IResult<&str, ClassSelector> {
+    map(preceded(tag("."), identifier), |o| ClassSelector { name: o })(input)
 }
 
 fn type_selector(input: &str) -> IResult<&str, TypeSelector> {
@@ -38,9 +45,10 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_type_selector() {}
-
+    #[test_case(
+    ".a" => Ok(("", Selector{ children: vec ! [SelectorChild::ClassSelector(ClassSelector{ name: "a" })] }));
+    "class selector"
+    )]
     #[test_case(
     "a" => Ok(("", Selector{ children: vec ! [SelectorChild::TypeSelector(TypeSelector{ name: "a" })] }));
     "type selector"
