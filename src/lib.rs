@@ -1,7 +1,5 @@
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 3, 4);
-    }
-}
+//#![no_std]
+extern crate alloc;
+
+mod grammar;
+mod parser;
