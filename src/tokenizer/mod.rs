@@ -8,9 +8,15 @@ use crate::tokenizer::helpers::*;
 #[derive(Debug, PartialEq)]
 enum Token {
     EOF,
-    Ident,
-    Function,
-    AtKeyword,
+    Ident(
+        String, // value
+    ),
+    Function(
+        String, // value
+    ),
+    AtKeyword(
+        String, // value
+    ),
     Hash(
         bool, // type_id flag
         String, // value
@@ -130,9 +136,38 @@ impl<'i> Tokenizer<'i> {
                 '(' => Token::LeftParenthesis,
                 ')' => Token::RightParenthesis,
                 '+' => self.consume_plus_sign(),
+                ',' => Token::Comma,
+                '-' => self.consume_minus_sign(),
+                '.' => self.consume_full_stop(),
+                ':' => Token::Colon,
+                ';' => Token::Semicolon,
+                '<' => match self.input.peek3(0) {
+                    (Some('!'), Some('-'), Some('-')) => Token::CDO,
+                    _ => Token::Delim('<'),
+                },
+                '@' => match self.input.peek3(0) {
+                    (Some(c1), Some(c2), Some(c3)) if would_start_identifier(c1, c2, c3) =>
+                        Token::AtKeyword(self.consume_name()),
+                    _ => Token::Delim('@'),
+                }
+                '[' => Token::LeftSquareBracket,
+                '\\' => match self.input.peek2(-1) {
+                    (Some(c1), Some(c2)) if is_valid_escape(c1, c2) => {
+                        self.input.reconsume(self.input.current);
+                        self.consume_identlike()
+                    }
+                    _ => /* parse error */ Token::Delim('\\'),
+                }
+                ']' => Token::RightSquareBracket,
+                '{' => Token::LeftCurlyBracket,
+                '}' => Token::RightCurlyBracket,
                 c if is_digit(c) => {
                     self.input.reconsume(self.input.current);
                     self.consume_numeric()
+                }
+                c if is_name_start(c) => {
+                    self.input.reconsume(self.input.current);
+                    self.consume_identlike()
                 }
                 c => Token::Delim(c),
             },
@@ -172,6 +207,35 @@ impl<'i> Tokenizer<'i> {
                 self.consume_numeric()
             }
             _ => Token::Delim('+'),
+        }
+    }
+
+    fn consume_minus_sign(&mut self) -> Token {
+        match self.input.peek3(-1) {
+            (Some(c1), Some(c2), Some(c3)) if would_start_number(c1, c2, c3) => {
+                self.input.reconsume(self.input.current);
+                self.consume_numeric()
+            }
+            (_, Some('-'), Some('>')) => {
+                self.input.consume();
+                self.input.consume();
+                Token::CDC
+            }
+            (Some(c1), Some(c2), Some(c3)) if would_start_identifier(c1, c2, c3) => {
+                self.input.reconsume(self.input.current);
+                self.consume_identlike()
+            }
+            _ => Token::Delim('-'),
+        }
+    }
+
+    fn consume_full_stop(&mut self) -> Token {
+        match self.input.peek3(-1) {
+            (Some(c1), Some(c2), Some(c3)) if would_start_number(c1, c2, c3) => {
+                self.input.reconsume(self.input.current);
+                self.consume_numeric()
+            }
+            _ => Token::Delim('.')
         }
     }
 
@@ -265,6 +329,41 @@ impl<'i> Tokenizer<'i> {
         }
     }
 
+    /// https://www.w3.org/TR/css-syntax-3/#consume-ident-like-token
+    fn consume_identlike(&mut self) -> Token {
+        let string = self.consume_name();
+
+        if self.input.peek(0) == Some('(') {
+            if string.eq_ignore_ascii_case("url") {
+                self.input.consume();
+
+                while let (Some(c1), Some(c2)) = self.input.peek2(0) {
+                    if is_whitespace(c1) && is_whitespace(c2) {
+                        self.input.consume();
+                    } else {
+                        break;
+                    }
+                }
+
+                match self.input.peek2(0) {
+                    (Some('"'), _) | (Some('\''), _) => {
+                        return Token::Function(string);
+                    }
+                    (Some(c), Some('"')) | (Some(c), Some('\'')) if is_whitespace(c) => {
+                        return Token::Function(string);
+                    }
+                    _ => {
+                        return self.consume_url();
+                    }
+                }
+            } else {
+                return Token::Function(string);
+            }
+        }
+
+        Token::Ident(string)
+    }
+
     /// 4.3.5. Consume a string token
     fn consume_string(&mut self, ending: char) -> Token {
         let mut value = String::from("");
@@ -297,6 +396,13 @@ impl<'i> Tokenizer<'i> {
                 }
             }
         }
+    }
+
+    /// https://www.w3.org/TR/css-syntax-3/#consume-url-token
+    fn consume_url(&mut self) -> Token {
+        // TODO: consume URL token
+
+        Token::Url
     }
 
     /// 4.3.7. Consume an escaped code point
@@ -373,7 +479,29 @@ mod tests {
 
     #[test]
     fn test() {
-        let input: &str = "test 'string' 123.213e-2 22px 55%";
+        let input: &str = r#"
+#lib() {
+  .colors() {
+    @primary: blue;
+    @secondary: green;
+  }
+  .rules(@size) {
+    border: @size solid white;
+  }
+}
+
+.box when (#lib.colors[@primary] = blue) {
+  width: 100px;
+  height: ($width / 2);
+}
+
+.bar:extend(.box) {
+  @media (min-width: 600px) {
+    width: 200px;
+    #lib.rules(1px);
+  }
+}
+"#;
         let mut tokenizer = Tokenizer::new(input.chars());
         for token in tokenizer {
             println!("{:?}", token);
