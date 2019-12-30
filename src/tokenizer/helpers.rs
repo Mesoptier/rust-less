@@ -57,3 +57,12 @@ pub fn would_start_identifier(c1: char, c2: char, c3: char) -> bool {
         _ => false,
     }
 }
+
+/// https://www.w3.org/TR/css-syntax-3/#starts-with-a-number
+pub fn would_start_number(c1: char, c2: char, c3: char) -> bool {
+    match c1 {
+        '+' | '-' => is_digit(c2) || (c2 == '.' && is_digit(c3)),
+        '.' => is_digit(c2),
+        c => is_digit(c),
+    }
+}

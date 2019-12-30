@@ -24,9 +24,18 @@ enum Token {
     Delim(
         char, // value
     ),
-    Number,
-    Percentage,
-    Dimension,
+    Number(
+        String, // value (repr)
+        bool, // is_integer
+    ),
+    Percentage(
+        String, // value (repr)
+    ),
+    Dimension(
+        String, // value (repr)
+        bool, // is_integer
+        String, // unit
+    ),
     Whitespace,
     CDO,
     CDC,
@@ -72,12 +81,26 @@ impl<L> Codepoints<L>
         self.buffer.push_front(value);
     }
 
-    fn peek(&mut self, index: usize) -> Option<char> {
-        // Fill buffer until it contains index
-        while index + 1 > self.buffer.len() {
-            self.buffer.push_back(self.input.next());
+    fn peek(&mut self, index: i32) -> Option<char> {
+        if index < -1 {
+            panic!();
+        } else if index == -1 {
+            return self.current;
+        } else {
+            // Fill buffer until it contains index
+            while index as usize + 1 > self.buffer.len() {
+                self.buffer.push_back(self.input.next());
+            }
+            *self.buffer.get(index as usize).unwrap()
         }
-        *self.buffer.get(index).unwrap()
+    }
+
+    fn peek2(&mut self, index: i32) -> (Option<char>, Option<char>) {
+        (self.peek(index), self.peek(index + 1))
+    }
+
+    fn peek3(&mut self, index: i32) -> (Option<char>, Option<char>, Option<char>) {
+        (self.peek(index), self.peek(index + 1), self.peek(index + 2))
     }
 }
 
@@ -104,6 +127,13 @@ impl<'i> Tokenizer<'i> {
                 '"' => self.consume_string('"'),
                 '#' => self.consume_number_sign(),
                 '\'' => self.consume_string('\''),
+                '(' => Token::LeftParenthesis,
+                ')' => Token::RightParenthesis,
+                '+' => self.consume_plus_sign(),
+                c if is_digit(c) => {
+                    self.input.reconsume(self.input.current);
+                    self.consume_numeric()
+                }
                 c => Token::Delim(c),
             },
             None => Token::EOF,
@@ -132,6 +162,106 @@ impl<'i> Tokenizer<'i> {
                 Token::Hash(type_id, value)
             }
             _ => Token::Delim('#'),
+        }
+    }
+
+    fn consume_plus_sign(&mut self) -> Token {
+        match (self.input.current, self.input.peek(0), self.input.peek(1)) {
+            (Some(c1), Some(c2), Some(c3)) if would_start_number(c1, c2, c3) => {
+                self.input.reconsume(self.input.current);
+                self.consume_numeric()
+            }
+            _ => Token::Delim('+'),
+        }
+    }
+
+    /// https://www.w3.org/TR/css-syntax-3/#consume-numeric-token
+    fn consume_numeric(&mut self) -> Token {
+        let (value, is_integer) = self.consume_number();
+
+        match self.input.peek3(0) {
+            (Some(c1), Some(c2), Some(c3)) if would_start_identifier(c1, c2, c3) =>
+                Token::Dimension(value, is_integer, self.consume_name()),
+            (Some(c1 @ '%'), _, _) => {
+                self.input.consume();
+                Token::Percentage(value)
+            }
+            _ => Token::Number(value, is_integer)
+        }
+    }
+
+    /// https://www.w3.org/TR/css-syntax-3/#consume-number
+    fn consume_number(&mut self) -> (String, bool) {
+        let mut repr = String::from("");
+        let mut is_integer = true;
+
+        match self.input.peek(0) {
+            Some(c @ '+') | Some(c @ '-') => {
+                self.input.consume();
+                repr.push(c);
+            }
+            _ => {}
+        }
+
+        repr.push_str(self.consume_digits().as_str());
+
+        match self.input.peek2(0) {
+            (Some(c1 @ '.'), Some(c2)) if is_digit(c2) => {
+                self.input.consume();
+                self.input.consume();
+                repr.push(c1);
+                repr.push(c2);
+                is_integer = false;
+                repr.push_str(self.consume_digits().as_str());
+            }
+            _ => {}
+        }
+
+        match self.input.peek(0) {
+            Some(c1 @ 'e') | Some(c1 @ 'E') => match self.input.peek(1) {
+                Some(c2) if is_digit(c2) => {
+                    self.input.consume();
+                    self.input.consume();
+                    repr.push(c1);
+                    repr.push(c2);
+                    is_integer = false;
+                    repr.push_str(self.consume_digits().as_str());
+                }
+                Some(c2 @ '+') | Some(c2 @ '-') => match self.input.peek(2) {
+                    Some(c3) if is_digit(c3) => {
+                        self.input.consume();
+                        self.input.consume();
+                        self.input.consume();
+                        repr.push(c1);
+                        repr.push(c2);
+                        repr.push(c3);
+                        is_integer = false;
+                        repr.push_str(self.consume_digits().as_str());
+                    }
+                    _ => {}
+                }
+                _ => {}
+            }
+            _ => {}
+        }
+
+        // TODO: Convert repr to number (f32) while constructing repr?
+
+        (repr, is_integer)
+    }
+
+    fn consume_digits(&mut self) -> String {
+        let mut repr = String::new();
+        loop {
+            match self.input.consume() {
+                Some(c) if is_digit(c) => {
+                    repr.push(c);
+                }
+                _ => {
+                    self.input.reconsume(self.input.current);
+                    return repr;
+                }
+            }
         }
     }
 
@@ -243,7 +373,7 @@ mod tests {
 
     #[test]
     fn test() {
-        let input: &str = "test 'string'";
+        let input: &str = "test 'string' 123.213e-2 22px 55%";
         let mut tokenizer = Tokenizer::new(input.chars());
         for token in tokenizer {
             println!("{:?}", token);
