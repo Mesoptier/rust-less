@@ -11,12 +11,19 @@ enum Token {
     Ident,
     Function,
     AtKeyword,
-    Hash,
-    String(String),
+    Hash(
+        bool, // type_id flag
+        String, // value
+    ),
+    String(
+        String, // value
+    ),
     BadString,
     Url,
     BadUrl,
-    Delim(char),
+    Delim(
+        char, // value
+    ),
     Number,
     Percentage,
     Dimension,
@@ -49,7 +56,7 @@ impl<L> Codepoints<L>
         Self {
             input,
             current: None,
-            buffer: Default::default()
+            buffer: Default::default(),
         }
     }
 
@@ -80,7 +87,7 @@ struct Tokenizer<'i> {
 
 impl<'i> Tokenizer<'i> {
     pub fn new(input: Chars<'i>) -> Self {
-        Self{
+        Self {
             input: Codepoints::new(input)
         }
     }
@@ -93,9 +100,9 @@ impl<'i> Tokenizer<'i> {
 
         match self.input.consume() {
             Some(codepoint) => match codepoint {
-                '\n' | '\t' | ' ' => self.consume_whitespace(),
+                c if is_whitespace(c) => self.consume_whitespace(),
                 '"' => self.consume_string('"'),
-//                '#' => {},
+                '#' => self.consume_number_sign(),
                 '\'' => self.consume_string('\''),
                 c => Token::Delim(c),
             },
@@ -106,7 +113,7 @@ impl<'i> Tokenizer<'i> {
     fn consume_whitespace(&mut self) -> Token {
         loop {
             match self.input.consume() {
-                Some('\n') | Some('\t') | Some(' ') => {}
+                Some(c) if is_whitespace(c) => {}
                 codepoint => {
                     self.input.reconsume(codepoint);
                     break;
@@ -115,6 +122,17 @@ impl<'i> Tokenizer<'i> {
         }
 
         Token::Whitespace
+    }
+
+    fn consume_number_sign(&mut self) -> Token {
+        match (self.input.peek(0), self.input.peek(1), self.input.peek(2)) {
+            (Some(c1), Some(c2), Some(c3)) if is_name(c1) || is_valid_escape(c1, c2) => {
+                let type_id = would_start_identifier(c1, c2, c3);
+                let value = self.consume_name();
+                Token::Hash(type_id, value)
+            }
+            _ => Token::Delim('#'),
+        }
     }
 
     /// 4.3.5. Consume a string token
@@ -165,7 +183,7 @@ impl<'i> Tokenizer<'i> {
                         value => {
                             self.input.reconsume(value);
                             break;
-                        },
+                        }
                     }
                 }
 
@@ -182,6 +200,28 @@ impl<'i> Tokenizer<'i> {
             }
             None => /* parse error */ core::char::REPLACEMENT_CHARACTER,
             Some(c) => c,
+        }
+    }
+
+    /// https://www.w3.org/TR/css-syntax-3/#consume-name
+    fn consume_name(&mut self) -> String {
+        let mut result = String::from("");
+        loop {
+            if let Some(c1) = self.input.consume() {
+                if is_name(c1) {
+                    result.push(c1);
+                    continue;
+                }
+                if let Some(c2) = self.input.peek(0) {
+                    if is_valid_escape(c1, c2) {
+                        result.push(self.consume_escaped_codepoint());
+                        continue;
+                    }
+                }
+            }
+
+            self.input.reconsume(self.input.current);
+            return result;
         }
     }
 }
