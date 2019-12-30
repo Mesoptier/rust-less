@@ -81,6 +81,13 @@ mod tests {
     "a" => Ok(("", Selector{ children: vec ! [SelectorChild::TypeSelector(TypeSelector{ name: "a" })] }));
     "type selector"
     )]
+    #[test_case(
+    "a + a" => Ok(("", Selector{ children: vec![
+        SelectorChild::TypeSelector(TypeSelector{ name: "a" }),
+        SelectorChild::Combinator(Combinator::AdjacentSibling),
+        SelectorChild::TypeSelector(TypeSelector{ name: "a" }),
+    ] }))
+    )]
     fn test_selector(input: &str) -> IResult<&str, Selector> {
         selector(input)
     }
