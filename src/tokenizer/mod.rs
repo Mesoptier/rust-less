@@ -6,8 +6,8 @@ use crate::tokenizer::helpers::*;
 use crate::stream::{Stream, PeekTuple, PeekAt};
 
 // https://www.w3.org/TR/css-syntax-3/#tokenization
-#[derive(Debug, PartialEq)]
-enum Token {
+#[derive(Debug, PartialEq, Clone)]
+pub enum Token {
     EOF,
     Ident {
         value: String,
