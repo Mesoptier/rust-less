@@ -88,7 +88,7 @@ impl<I> Parser<I> where I: Iterator<Item=Token> {
             // etc.
             match self.input.consume() {
                 Some(Token::Colon) => self.consume_variable_declaration(value),
-                Some(Token::LeftParenthesis) => {
+                Some(Token::LeftParenthesis) => { // TODO: This is wrong! It also triggers on @media (min-width: ...) { ... }
                     self.input.reconsume_current();
                     self.consume_variable_call(value)
                 }
