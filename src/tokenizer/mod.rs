@@ -3,6 +3,7 @@ mod helpers;
 use alloc::collections::VecDeque;
 use std::str::Chars;
 use crate::tokenizer::helpers::*;
+use crate::stream::{Stream, PeekTuple, PeekAt};
 
 // https://www.w3.org/TR/css-syntax-3/#tokenization
 #[derive(Debug, PartialEq)]
@@ -56,59 +57,7 @@ enum Token {
     RightCurlyBracket,
 }
 
-struct Codepoints<L> {
-    input: L,
-    current: Option<char>,
-
-    // TODO: Use arraydeque, since CSS tokenizer only does ~3 lookahead + ~1 reconsume
-    buffer: VecDeque<Option<char>>,
-}
-
-impl<L> Codepoints<L>
-    where L: Iterator<Item=char>,
-{
-    pub fn new(input: L) -> Self {
-        Self {
-            input,
-            current: None,
-            buffer: Default::default(),
-        }
-    }
-
-    fn consume(&mut self) -> Option<char> {
-        self.current = match self.buffer.pop_front() {
-            Some(value) => value,
-            None => self.input.next(),
-        };
-        self.current
-    }
-
-    fn reconsume(&mut self, value: Option<char>) {
-        self.buffer.push_front(value);
-    }
-
-    fn peek(&mut self, index: i32) -> Option<char> {
-        if index < -1 {
-            panic!();
-        } else if index == -1 {
-            return self.current;
-        } else {
-            // Fill buffer until it contains index
-            while index as usize + 1 > self.buffer.len() {
-                self.buffer.push_back(self.input.next());
-            }
-            *self.buffer.get(index as usize).unwrap()
-        }
-    }
-
-    fn peek2(&mut self, index: i32) -> (Option<char>, Option<char>) {
-        (self.peek(index), self.peek(index + 1))
-    }
-
-    fn peek3(&mut self, index: i32) -> (Option<char>, Option<char>, Option<char>) {
-        (self.peek(index), self.peek(index + 1), self.peek(index + 2))
-    }
-}
+type Codepoints<L: Iterator<Item = char>> = Stream<char, L, [Option<char>; 5]>;
 
 struct Tokenizer<'i> {
     input: Codepoints<Chars<'i>>,
@@ -141,19 +90,19 @@ impl<'i> Tokenizer<'i> {
                 '.' => self.consume_full_stop(),
                 ':' => Token::Colon,
                 ';' => Token::Semicolon,
-                '<' => match self.input.peek3(0) {
+                '<' => match self.input.peek_tuple(0) {
                     (Some('!'), Some('-'), Some('-')) => Token::CDO,
                     _ => Token::Delim { value: '<' },
                 },
-                '@' => match self.input.peek3(0) {
+                '@' => match self.input.peek_tuple(0) {
                     (Some(c1), Some(c2), Some(c3)) if would_start_identifier(c1, c2, c3) =>
                         Token::AtKeyword { value: self.consume_name() },
                     _ => Token::Delim { value: '@' },
                 }
                 '[' => Token::LeftSquareBracket,
-                '\\' => match self.input.peek2(-1) {
+                '\\' => match self.input.peek_tuple(-1) {
                     (Some(c1), Some(c2)) if is_valid_escape(c1, c2) => {
-                        self.input.reconsume(self.input.current);
+                        self.input.reconsume_current();
                         self.consume_identlike()
                     }
                     _ => /* parse error */ Token::Delim { value: '\\' },
@@ -162,11 +111,11 @@ impl<'i> Tokenizer<'i> {
                 '{' => Token::LeftCurlyBracket,
                 '}' => Token::RightCurlyBracket,
                 c if is_digit(c) => {
-                    self.input.reconsume(self.input.current);
+                    self.input.reconsume_current();
                     self.consume_numeric()
                 }
                 c if is_name_start(c) => {
-                    self.input.reconsume(self.input.current);
+                    self.input.reconsume_current();
                     self.consume_identlike()
                 }
                 c => Token::Delim { value: c },
@@ -179,8 +128,8 @@ impl<'i> Tokenizer<'i> {
         loop {
             match self.input.consume() {
                 Some(c) if is_whitespace(c) => {}
-                codepoint => {
-                    self.input.reconsume(codepoint);
+                _ => {
+                    self.input.reconsume_current();
                     break;
                 }
             }
@@ -190,7 +139,7 @@ impl<'i> Tokenizer<'i> {
     }
 
     fn consume_number_sign(&mut self) -> Token {
-        match (self.input.peek(0), self.input.peek(1), self.input.peek(2)) {
+        match (self.input.peek_at(0), self.input.peek_at(1), self.input.peek_at(2)) {
             (Some(c1), Some(c2), Some(c3)) if is_name(c1) || is_valid_escape(c1, c2) => {
                 let is_id = would_start_identifier(c1, c2, c3);
                 let value = self.consume_name();
@@ -201,9 +150,9 @@ impl<'i> Tokenizer<'i> {
     }
 
     fn consume_plus_sign(&mut self) -> Token {
-        match (self.input.current, self.input.peek(0), self.input.peek(1)) {
+        match self.input.peek_tuple(-1) {
             (Some(c1), Some(c2), Some(c3)) if would_start_number(c1, c2, c3) => {
-                self.input.reconsume(self.input.current);
+                self.input.reconsume_current();
                 self.consume_numeric()
             }
             _ => Token::Delim { value: '+' },
@@ -211,9 +160,9 @@ impl<'i> Tokenizer<'i> {
     }
 
     fn consume_minus_sign(&mut self) -> Token {
-        match self.input.peek3(-1) {
+        match self.input.peek_tuple(-1) {
             (Some(c1), Some(c2), Some(c3)) if would_start_number(c1, c2, c3) => {
-                self.input.reconsume(self.input.current);
+                self.input.reconsume_current();
                 self.consume_numeric()
             }
             (_, Some('-'), Some('>')) => {
@@ -222,7 +171,7 @@ impl<'i> Tokenizer<'i> {
                 Token::CDC
             }
             (Some(c1), Some(c2), Some(c3)) if would_start_identifier(c1, c2, c3) => {
-                self.input.reconsume(self.input.current);
+                self.input.reconsume_current();
                 self.consume_identlike()
             }
             _ => Token::Delim { value: '-' },
@@ -230,9 +179,9 @@ impl<'i> Tokenizer<'i> {
     }
 
     fn consume_full_stop(&mut self) -> Token {
-        match self.input.peek3(-1) {
+        match self.input.peek_tuple(-1) {
             (Some(c1), Some(c2), Some(c3)) if would_start_number(c1, c2, c3) => {
-                self.input.reconsume(self.input.current);
+                self.input.reconsume_current();
                 self.consume_numeric()
             }
             _ => Token::Delim { value: '.' },
@@ -243,7 +192,7 @@ impl<'i> Tokenizer<'i> {
     fn consume_numeric(&mut self) -> Token {
         let (value, is_integer) = self.consume_number();
 
-        match self.input.peek3(0) {
+        match self.input.peek_tuple(0) {
             (Some(c1), Some(c2), Some(c3)) if would_start_identifier(c1, c2, c3) =>
                 Token::Dimension { value, is_integer, unit: self.consume_name() },
             (Some(c1 @ '%'), _, _) => {
@@ -259,7 +208,7 @@ impl<'i> Tokenizer<'i> {
         let mut repr = String::from("");
         let mut is_integer = true;
 
-        match self.input.peek(0) {
+        match self.input.peek_at(0) {
             Some(c @ '+') | Some(c @ '-') => {
                 self.input.consume();
                 repr.push(c);
@@ -269,7 +218,7 @@ impl<'i> Tokenizer<'i> {
 
         repr.push_str(self.consume_digits().as_str());
 
-        match self.input.peek2(0) {
+        match self.input.peek_tuple(0) {
             (Some(c1 @ '.'), Some(c2)) if is_digit(c2) => {
                 self.input.consume();
                 self.input.consume();
@@ -281,8 +230,8 @@ impl<'i> Tokenizer<'i> {
             _ => {}
         }
 
-        match self.input.peek(0) {
-            Some(c1 @ 'e') | Some(c1 @ 'E') => match self.input.peek(1) {
+        match self.input.peek_at(0) {
+            Some(c1 @ 'e') | Some(c1 @ 'E') => match self.input.peek_at(1) {
                 Some(c2) if is_digit(c2) => {
                     self.input.consume();
                     self.input.consume();
@@ -291,7 +240,7 @@ impl<'i> Tokenizer<'i> {
                     is_integer = false;
                     repr.push_str(self.consume_digits().as_str());
                 }
-                Some(c2 @ '+') | Some(c2 @ '-') => match self.input.peek(2) {
+                Some(c2 @ '+') | Some(c2 @ '-') => match self.input.peek_at(2) {
                     Some(c3) if is_digit(c3) => {
                         self.input.consume();
                         self.input.consume();
@@ -322,7 +271,7 @@ impl<'i> Tokenizer<'i> {
                     repr.push(c);
                 }
                 _ => {
-                    self.input.reconsume(self.input.current);
+                    self.input.reconsume_current();
                     return repr;
                 }
             }
@@ -333,11 +282,11 @@ impl<'i> Tokenizer<'i> {
     fn consume_identlike(&mut self) -> Token {
         let value = self.consume_name();
 
-        if self.input.peek(0) == Some('(') {
+        if self.input.peek_at(0) == Some('(') {
             if value.eq_ignore_ascii_case("url") {
                 self.input.consume();
 
-                while let (Some(c1), Some(c2)) = self.input.peek2(0) {
+                while let (Some(c1), Some(c2)) = self.input.peek_tuple(0) {
                     if is_whitespace(c1) && is_whitespace(c2) {
                         self.input.consume();
                     } else {
@@ -345,7 +294,7 @@ impl<'i> Tokenizer<'i> {
                     }
                 }
 
-                match self.input.peek2(0) {
+                match self.input.peek_tuple(0) {
                     (Some('"'), _) | (Some('\''), _) => {
                         return Token::Function { value };
                     }
@@ -377,11 +326,11 @@ impl<'i> Tokenizer<'i> {
                     return Token::String { value };
                 }
                 Some('\n') => /* parse error */ {
-                    self.input.reconsume(self.input.current);
+                    self.input.reconsume_current();
                     return Token::BadString;
                 }
                 Some('\\') => {
-                    match self.input.peek(0) {
+                    match self.input.peek_at(0) {
                         None => {}
                         Some('\n') => {
                             self.input.consume();
@@ -416,15 +365,15 @@ impl<'i> Tokenizer<'i> {
                 for i in 1..=5 {
                     match self.input.consume() {
                         Some(c) if is_hex_digit(c) => digits.push(c),
-                        value => {
-                            self.input.reconsume(value);
+                        _ => {
+                            self.input.reconsume_current();
                             break;
                         }
                     }
                 }
 
                 // If the next codepoint is whitespace, consume it as well
-                if let Some(c) = self.input.peek(0) {
+                if let Some(c) = self.input.peek_at(0) {
                     if is_whitespace(c) {
                         self.input.consume();
                     }
@@ -448,7 +397,7 @@ impl<'i> Tokenizer<'i> {
                     result.push(c1);
                     continue;
                 }
-                if let Some(c2) = self.input.peek(0) {
+                if let Some(c2) = self.input.peek_at(0) {
                     if is_valid_escape(c1, c2) {
                         result.push(self.consume_escaped_codepoint());
                         continue;
@@ -456,7 +405,7 @@ impl<'i> Tokenizer<'i> {
                 }
             }
 
-            self.input.reconsume(self.input.current);
+            self.input.reconsume_current();
             return result;
         }
     }

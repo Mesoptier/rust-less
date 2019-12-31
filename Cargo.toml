@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 combine = "4.0.0-beta.2"
 nom = "5.0.1"
+arraydeque = { version = "0.4.5", default-features = false }
 
 [dev-dependencies]
 test-case = "1.0.0-alpha-1"

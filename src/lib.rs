@@ -7,3 +7,4 @@ extern crate test_case;
 mod grammar;
 mod parser;
 mod tokenizer;
+mod stream;
