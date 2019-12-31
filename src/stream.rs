@@ -11,10 +11,6 @@ pub struct Stream<T, L, A>
     buffer: ArrayDeque<A, Saturating>,
 }
 
-///
-///
-/// # Panics
-///
 impl<T, L, A> Stream<T, L, A>
     where
         T: Copy,
