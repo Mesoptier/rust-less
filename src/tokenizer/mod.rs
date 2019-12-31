@@ -59,7 +59,7 @@ pub enum Token {
 
 type Codepoints<L: Iterator<Item=char>> = Stream<char, L, [Option<char>; 3]>;
 
-struct Tokenizer<'i> {
+pub struct Tokenizer<'i> {
     input: Codepoints<Chars<'i>>,
 }
 
