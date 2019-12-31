@@ -8,40 +8,40 @@ use crate::tokenizer::helpers::*;
 #[derive(Debug, PartialEq)]
 enum Token {
     EOF,
-    Ident(
-        String, // value
-    ),
-    Function(
-        String, // value
-    ),
-    AtKeyword(
-        String, // value
-    ),
-    Hash(
-        bool, // type_id flag
-        String, // value
-    ),
-    String(
-        String, // value
-    ),
+    Ident {
+        value: String,
+    },
+    Function {
+        value: String,
+    },
+    AtKeyword {
+        value: String,
+    },
+    Hash {
+        is_id: bool,
+        value: String,
+    },
+    String {
+        value: String,
+    },
     BadString,
     Url,
     BadUrl,
-    Delim(
-        char, // value
-    ),
-    Number(
-        String, // value (repr)
-        bool, // is_integer
-    ),
-    Percentage(
-        String, // value (repr)
-    ),
-    Dimension(
-        String, // value (repr)
-        bool, // is_integer
-        String, // unit
-    ),
+    Delim {
+        value: char,
+    },
+    Number {
+        value: String,
+        is_integer: bool,
+    },
+    Percentage {
+        value: String,
+    },
+    Dimension {
+        value: String,
+        is_integer: bool,
+        unit: String,
+    },
     Whitespace,
     CDO,
     CDC,
@@ -143,12 +143,12 @@ impl<'i> Tokenizer<'i> {
                 ';' => Token::Semicolon,
                 '<' => match self.input.peek3(0) {
                     (Some('!'), Some('-'), Some('-')) => Token::CDO,
-                    _ => Token::Delim('<'),
+                    _ => Token::Delim { value: '<' },
                 },
                 '@' => match self.input.peek3(0) {
                     (Some(c1), Some(c2), Some(c3)) if would_start_identifier(c1, c2, c3) =>
-                        Token::AtKeyword(self.consume_name()),
-                    _ => Token::Delim('@'),
+                        Token::AtKeyword { value: self.consume_name() },
+                    _ => Token::Delim { value: '@' },
                 }
                 '[' => Token::LeftSquareBracket,
                 '\\' => match self.input.peek2(-1) {
@@ -156,7 +156,7 @@ impl<'i> Tokenizer<'i> {
                         self.input.reconsume(self.input.current);
                         self.consume_identlike()
                     }
-                    _ => /* parse error */ Token::Delim('\\'),
+                    _ => /* parse error */ Token::Delim { value: '\\' },
                 }
                 ']' => Token::RightSquareBracket,
                 '{' => Token::LeftCurlyBracket,
@@ -169,7 +169,7 @@ impl<'i> Tokenizer<'i> {
                     self.input.reconsume(self.input.current);
                     self.consume_identlike()
                 }
-                c => Token::Delim(c),
+                c => Token::Delim { value: c },
             },
             None => Token::EOF,
         }
@@ -192,11 +192,11 @@ impl<'i> Tokenizer<'i> {
     fn consume_number_sign(&mut self) -> Token {
         match (self.input.peek(0), self.input.peek(1), self.input.peek(2)) {
             (Some(c1), Some(c2), Some(c3)) if is_name(c1) || is_valid_escape(c1, c2) => {
-                let type_id = would_start_identifier(c1, c2, c3);
+                let is_id = would_start_identifier(c1, c2, c3);
                 let value = self.consume_name();
-                Token::Hash(type_id, value)
+                Token::Hash { is_id, value }
             }
-            _ => Token::Delim('#'),
+            _ => Token::Delim { value: '#' },
         }
     }
 
@@ -206,7 +206,7 @@ impl<'i> Tokenizer<'i> {
                 self.input.reconsume(self.input.current);
                 self.consume_numeric()
             }
-            _ => Token::Delim('+'),
+            _ => Token::Delim { value: '+' },
         }
     }
 
@@ -225,7 +225,7 @@ impl<'i> Tokenizer<'i> {
                 self.input.reconsume(self.input.current);
                 self.consume_identlike()
             }
-            _ => Token::Delim('-'),
+            _ => Token::Delim { value: '-' },
         }
     }
 
@@ -235,7 +235,7 @@ impl<'i> Tokenizer<'i> {
                 self.input.reconsume(self.input.current);
                 self.consume_numeric()
             }
-            _ => Token::Delim('.')
+            _ => Token::Delim { value: '.' },
         }
     }
 
@@ -245,12 +245,12 @@ impl<'i> Tokenizer<'i> {
 
         match self.input.peek3(0) {
             (Some(c1), Some(c2), Some(c3)) if would_start_identifier(c1, c2, c3) =>
-                Token::Dimension(value, is_integer, self.consume_name()),
+                Token::Dimension { value, is_integer, unit: self.consume_name() },
             (Some(c1 @ '%'), _, _) => {
                 self.input.consume();
-                Token::Percentage(value)
+                Token::Percentage { value }
             }
-            _ => Token::Number(value, is_integer)
+            _ => Token::Number { value, is_integer }
         }
     }
 
@@ -331,10 +331,10 @@ impl<'i> Tokenizer<'i> {
 
     /// https://www.w3.org/TR/css-syntax-3/#consume-ident-like-token
     fn consume_identlike(&mut self) -> Token {
-        let string = self.consume_name();
+        let value = self.consume_name();
 
         if self.input.peek(0) == Some('(') {
-            if string.eq_ignore_ascii_case("url") {
+            if value.eq_ignore_ascii_case("url") {
                 self.input.consume();
 
                 while let (Some(c1), Some(c2)) = self.input.peek2(0) {
@@ -347,21 +347,21 @@ impl<'i> Tokenizer<'i> {
 
                 match self.input.peek2(0) {
                     (Some('"'), _) | (Some('\''), _) => {
-                        return Token::Function(string);
+                        return Token::Function { value };
                     }
                     (Some(c), Some('"')) | (Some(c), Some('\'')) if is_whitespace(c) => {
-                        return Token::Function(string);
+                        return Token::Function { value };
                     }
                     _ => {
                         return self.consume_url();
                     }
                 }
             } else {
-                return Token::Function(string);
+                return Token::Function { value };
             }
         }
 
-        Token::Ident(string)
+        Token::Ident { value }
     }
 
     /// 4.3.5. Consume a string token
@@ -371,10 +371,10 @@ impl<'i> Tokenizer<'i> {
         loop {
             match self.input.consume() {
                 Some(c) if c == ending => {
-                    return Token::String(value);
+                    return Token::String { value };
                 }
                 None => /* parse error */ {
-                    return Token::String(value);
+                    return Token::String { value };
                 }
                 Some('\n') => /* parse error */ {
                     self.input.reconsume(self.input.current);
