@@ -57,7 +57,7 @@ enum Token {
     RightCurlyBracket,
 }
 
-type Codepoints<L: Iterator<Item = char>> = Stream<char, L, [Option<char>; 5]>;
+type Codepoints<L: Iterator<Item=char>> = Stream<char, L, [Option<char>; 3]>;
 
 struct Tokenizer<'i> {
     input: Codepoints<Chars<'i>>,
