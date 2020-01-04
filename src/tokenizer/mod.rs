@@ -9,15 +9,9 @@ use std::borrow::{Cow, Borrow};
 // https://www.w3.org/TR/css-syntax-3/#tokenization
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token<'i> {
-    Ident {
-        value: Cow<'i, str>,
-    },
-    Function {
-        value: Cow<'i, str>,
-    },
-    AtKeyword {
-        value: Cow<'i, str>,
-    },
+    Ident(Cow<'i, str>),
+    Function(Cow<'i, str>),
+    AtKeyword(Cow<'i, str>),
     Hash {
         is_id: bool,
         value: Cow<'i, str>,
@@ -162,7 +156,7 @@ impl<'i> Tokenizer<'i> {
                     self.advance(1);
                     match self.lookahead_triple() {
                         (Some(c1), Some(c2), Some(c3)) if would_start_identifier(c1, c2, c3) =>
-                            Token::AtKeyword { value: self.consume_name() },
+                            Token::AtKeyword(self.consume_name()),
                         _ => Token::Delim('@'),
                     }
                 }
@@ -384,21 +378,21 @@ impl<'i> Tokenizer<'i> {
 
                 return match self.lookahead_pair() {
                     (Some('"'), _) | (Some('\''), _) => {
-                        Token::Function { value }
+                        Token::Function(value)
                     }
                     (Some(c), Some('"')) | (Some(c), Some('\'')) if is_whitespace(c) => {
-                        Token::Function { value }
+                        Token::Function(value)
                     }
                     _ => {
                         self.consume_url()
                     }
                 };
             } else {
-                return Token::Function { value };
+                return Token::Function(value);
             }
         }
 
-        Token::Ident { value }
+        Token::Ident(value)
     }
 
     /// Consume a string token.
@@ -486,6 +480,26 @@ impl<'i> Iterator for Tokenizer<'i> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_cases() {
+        let cases: Vec<(&str, Vec<Token>)> = vec![
+            ("ident", vec![Token::Ident("ident".into())]),
+            ("func()", vec![Token::Function("func".into()), Token::LeftParenthesis, Token::RightParenthesis]),
+            ("@at-keyword", vec![Token::AtKeyword("at-keyword".into())]),
+            ("{", vec![Token::LeftCurlyBracket]),
+            ("}", vec![Token::RightCurlyBracket]),
+            ("(", vec![Token::LeftParenthesis]),
+            (")", vec![Token::RightParenthesis]),
+            ("[", vec![Token::LeftSquareBracket]),
+            ("]", vec![Token::RightSquareBracket]),
+        ];
+
+        for (input, expected) in cases {
+            let tokenizer = Tokenizer::new(input);
+            assert_eq!(tokenizer.collect::<Vec<Token>>(), expected);
+        }
+    }
 
     #[test]
     fn test() {
