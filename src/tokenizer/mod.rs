@@ -1,49 +1,48 @@
 mod helpers;
 
 use alloc::collections::VecDeque;
-use std::str::Chars;
+use std::str::CharIndices;
 use crate::tokenizer::helpers::*;
-use crate::stream::{Stream, PeekTuple, PeekAt};
+use std::iter::Peekable;
+use std::borrow::{Cow, Borrow};
 
 // https://www.w3.org/TR/css-syntax-3/#tokenization
 #[derive(Debug, PartialEq, Clone)]
-pub enum Token {
-    EOF,
+pub enum Token<'i> {
     Ident {
-        value: String,
+        value: Cow<'i, str>,
     },
     Function {
-        value: String,
+        value: Cow<'i, str>,
     },
     AtKeyword {
-        value: String,
+        value: Cow<'i, str>,
     },
     Hash {
         is_id: bool,
-        value: String,
+        value: Cow<'i, str>,
     },
     String {
-        value: String,
+        /// Value inside the quotes.
+        value: Cow<'i, str>,
     },
     BadString,
     Url,
     BadUrl,
-    Delim {
-        value: char,
-    },
+    Delim(char),
     Number {
-        value: String,
+        value: &'i str,
         is_integer: bool,
     },
     Percentage {
-        value: String,
+        value: &'i str,
     },
     Dimension {
-        value: String,
+        value: &'i str,
         is_integer: bool,
-        unit: String,
+        unit: Cow<'i, str>,
     },
-    Whitespace,
+    Whitespace(&'i str),
     CDO,
     CDC,
     Colon,
@@ -57,146 +56,251 @@ pub enum Token {
     RightCurlyBracket,
 }
 
-type Codepoints<L: Iterator<Item=char>> = Stream<char, L, [Option<char>; 3]>;
-
 pub struct Tokenizer<'i> {
-    input: Codepoints<Chars<'i>>,
+    input: &'i str,
+    position: usize,
+    iter: Peekable<CharIndices<'i>>,
 }
 
 impl<'i> Tokenizer<'i> {
-    pub fn new(input: Chars<'i>) -> Self {
+    pub fn new(input: &'i str) -> Tokenizer {
         Self {
-            input: Codepoints::new(input)
+            input,
+            position: 0,
+            iter: input.char_indices().peekable(),
         }
     }
 
-    /// 4.3.1. Consume a token
-    fn consume_token(&mut self) -> Token {
+    fn advance(&mut self, dist: usize) {
+        for i in 0..dist {
+            match self.iter.next() {
+                Some((p, _)) => {
+                    self.position = p + 1;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn consume(&mut self) -> Option<char> {
+        match self.iter.next() {
+            Some((p, c)) => {
+                self.position = p + 1;
+                Some(c)
+            }
+            None => None,
+        }
+    }
+
+    fn lookahead(&mut self, dist: usize) -> Option<char> {
+        if dist == 0 {
+            return self.iter.peek().map(|(_, c)| *c);
+        }
+        self.iter.clone().nth(dist).map(|(_, c)| c)
+    }
+
+    fn lookahead_pair(&self) -> (Option<char>, Option<char>) {
+        let mut iter = self.iter.clone();
+        (
+            iter.next().map(|(_, c)| c),
+            iter.next().map(|(_, c)| c),
+        )
+    }
+
+    fn lookahead_triple(&self) -> (Option<char>, Option<char>, Option<char>) {
+        let mut iter = self.iter.clone();
+        (
+            iter.next().map(|(_, c)| c),
+            iter.next().map(|(_, c)| c),
+            iter.next().map(|(_, c)| c),
+        )
+    }
+
+    /// Consume the next token.
+    fn consume_token(&mut self) -> Option<Token<'i>> {
         // TODO: Use utf-8/utf8 crate to get the next code-point
         // TODO: Preprocess input stream (https://www.w3.org/TR/css-syntax-3/#input-preprocessing)
         // TODO: self.consume_comments();
 
-        match self.input.consume() {
-            Some(codepoint) => match codepoint {
+        match self.lookahead(0) {
+            Some(c) => Some(match c {
                 c if is_whitespace(c) => self.consume_whitespace(),
                 '"' => self.consume_string('"'),
                 '#' => self.consume_number_sign(),
                 '\'' => self.consume_string('\''),
-                '(' => Token::LeftParenthesis,
-                ')' => Token::RightParenthesis,
+                '(' => {
+                    self.advance(1);
+                    Token::LeftParenthesis
+                }
+                ')' => {
+                    self.advance(1);
+                    Token::RightParenthesis
+                }
                 '+' => self.consume_plus_sign(),
-                ',' => Token::Comma,
+                ',' => {
+                    self.advance(1);
+                    Token::Comma
+                }
                 '-' => self.consume_minus_sign(),
                 '.' => self.consume_full_stop(),
-                ':' => Token::Colon,
-                ';' => Token::Semicolon,
-                '<' => match self.input.peek_tuple(0) {
-                    (Some('!'), Some('-'), Some('-')) => Token::CDO,
-                    _ => Token::Delim { value: '<' },
-                },
-                '@' => match self.input.peek_tuple(0) {
-                    (Some(c1), Some(c2), Some(c3)) if would_start_identifier(c1, c2, c3) =>
-                        Token::AtKeyword { value: self.consume_name() },
-                    _ => Token::Delim { value: '@' },
+                ':' => {
+                    self.advance(1);
+                    Token::Colon
                 }
-                '[' => Token::LeftSquareBracket,
-                '\\' => match self.input.peek_tuple(-1) {
+                ';' => {
+                    self.advance(1);
+                    Token::Semicolon
+                }
+                '<' => {
+                    self.advance(1);
+                    match self.lookahead_triple() {
+                        (Some('!'), Some('-'), Some('-')) => Token::CDO,
+                        _ => Token::Delim('<'),
+                    }
+                }
+                '@' => {
+                    self.advance(1);
+                    match self.lookahead_triple() {
+                        (Some(c1), Some(c2), Some(c3)) if would_start_identifier(c1, c2, c3) =>
+                            Token::AtKeyword { value: self.consume_name() },
+                        _ => Token::Delim('@'),
+                    }
+                }
+                '[' => {
+                    self.advance(1);
+                    Token::LeftSquareBracket
+                }
+                '\\' => match self.lookahead_pair() {
                     (Some(c1), Some(c2)) if is_valid_escape(c1, c2) => {
-                        self.input.reconsume_current();
                         self.consume_identlike()
                     }
-                    _ => /* parse error */ Token::Delim { value: '\\' },
+                    _ => {
+                        // parse error
+                        self.advance(1);
+                        Token::Delim('\\')
+                    }
                 }
-                ']' => Token::RightSquareBracket,
-                '{' => Token::LeftCurlyBracket,
-                '}' => Token::RightCurlyBracket,
+                ']' => {
+                    self.advance(1);
+                    Token::RightSquareBracket
+                }
+                '{' => {
+                    self.advance(1);
+                    Token::LeftCurlyBracket
+                }
+                '}' => {
+                    self.advance(1);
+                    Token::RightCurlyBracket
+                }
                 c if is_digit(c) => {
-                    self.input.reconsume_current();
                     self.consume_numeric()
                 }
                 c if is_name_start(c) => {
-                    self.input.reconsume_current();
                     self.consume_identlike()
                 }
-                c => Token::Delim { value: c },
-            },
-            None => Token::EOF,
+                c => {
+                    self.advance(1);
+                    Token::Delim(c)
+                }
+            }),
+            None => None,
         }
     }
 
-    fn consume_whitespace(&mut self) -> Token {
+    /// Consume a whitespace token.
+    ///
+    /// Precondition: next char is whitespace.
+    fn consume_whitespace(&mut self) -> Token<'i> {
+        let start = self.position;
+        self.advance(1);
         loop {
-            match self.input.consume() {
-                Some(c) if is_whitespace(c) => {}
+            match self.lookahead(0) {
+                Some(c) if is_whitespace(c) => {
+                    self.consume();
+                }
                 _ => {
-                    self.input.reconsume_current();
                     break;
                 }
             }
         }
-
-        Token::Whitespace
+        Token::Whitespace(&self.input[start..=self.position - 1])
     }
 
-    fn consume_number_sign(&mut self) -> Token {
-        match (self.input.peek_at(0), self.input.peek_at(1), self.input.peek_at(2)) {
+    /// Consume a token starting with '#'.
+    ///
+    /// Precondition: next char is '#'.
+    fn consume_number_sign(&mut self) -> Token<'i> {
+        self.advance(1);
+        match self.lookahead_triple() {
             (Some(c1), Some(c2), Some(c3)) if is_name(c1) || is_valid_escape(c1, c2) => {
                 let is_id = would_start_identifier(c1, c2, c3);
                 let value = self.consume_name();
                 Token::Hash { is_id, value }
             }
-            _ => Token::Delim { value: '#' },
+            _ => {
+                Token::Delim('#')
+            }
         }
     }
 
-    fn consume_plus_sign(&mut self) -> Token {
-        match self.input.peek_tuple(-1) {
+    /// Consume a token starting with '+'.
+    ///
+    /// Precondition: next char is '+'.
+    fn consume_plus_sign(&mut self) -> Token<'i> {
+        match self.lookahead_triple() {
             (Some(c1), Some(c2), Some(c3)) if would_start_number(c1, c2, c3) => {
-                self.input.reconsume_current();
                 self.consume_numeric()
             }
-            _ => Token::Delim { value: '+' },
+            _ => {
+                self.advance(1);
+                Token::Delim('+')
+            }
         }
     }
 
-    fn consume_minus_sign(&mut self) -> Token {
-        match self.input.peek_tuple(-1) {
+    /// Consume a token starting with '-'.
+    ///
+    /// Precondition: next char is '-'.
+    fn consume_minus_sign(&mut self) -> Token<'i> {
+        match self.lookahead_triple() {
             (Some(c1), Some(c2), Some(c3)) if would_start_number(c1, c2, c3) => {
-                self.input.reconsume_current();
                 self.consume_numeric()
             }
             (_, Some('-'), Some('>')) => {
-                self.input.consume();
-                self.input.consume();
+                self.advance(3);
                 Token::CDC
             }
             (Some(c1), Some(c2), Some(c3)) if would_start_identifier(c1, c2, c3) => {
-                self.input.reconsume_current();
                 self.consume_identlike()
             }
-            _ => Token::Delim { value: '-' },
+            _ => {
+                self.advance(1);
+                Token::Delim('-')
+            }
         }
     }
 
-    fn consume_full_stop(&mut self) -> Token {
-        match self.input.peek_tuple(-1) {
+    fn consume_full_stop(&mut self) -> Token<'i> {
+        match self.lookahead_triple() {
             (Some(c1), Some(c2), Some(c3)) if would_start_number(c1, c2, c3) => {
-                self.input.reconsume_current();
                 self.consume_numeric()
             }
-            _ => Token::Delim { value: '.' },
+            _ => {
+                self.advance(1);
+                Token::Delim('.')
+            }
         }
     }
 
     /// https://www.w3.org/TR/css-syntax-3/#consume-numeric-token
-    fn consume_numeric(&mut self) -> Token {
+    fn consume_numeric(&mut self) -> Token<'i> {
         let (value, is_integer) = self.consume_number();
 
-        match self.input.peek_tuple(0) {
+        match self.lookahead_triple() {
             (Some(c1), Some(c2), Some(c3)) if would_start_identifier(c1, c2, c3) =>
                 Token::Dimension { value, is_integer, unit: self.consume_name() },
             (Some(c1 @ '%'), _, _) => {
-                self.input.consume();
+                self.advance(1);
                 Token::Percentage { value }
             }
             _ => Token::Number { value, is_integer }
@@ -204,52 +308,40 @@ impl<'i> Tokenizer<'i> {
     }
 
     /// https://www.w3.org/TR/css-syntax-3/#consume-number
-    fn consume_number(&mut self) -> (String, bool) {
-        let mut repr = String::from("");
+    fn consume_number(&mut self) -> (&'i str, bool) {
+        let start_pos = self.position;
         let mut is_integer = true;
 
-        match self.input.peek_at(0) {
+        match self.lookahead(0) {
             Some(c @ '+') | Some(c @ '-') => {
-                self.input.consume();
-                repr.push(c);
+                self.advance(1);
             }
             _ => {}
         }
 
-        repr.push_str(self.consume_digits().as_str());
+        self.consume_digits();
 
-        match self.input.peek_tuple(0) {
+        match self.lookahead_pair() {
             (Some(c1 @ '.'), Some(c2)) if is_digit(c2) => {
-                self.input.consume();
-                self.input.consume();
-                repr.push(c1);
-                repr.push(c2);
+                self.advance(2);
                 is_integer = false;
-                repr.push_str(self.consume_digits().as_str());
+                self.consume_digits();
             }
             _ => {}
         }
 
-        match self.input.peek_at(0) {
-            Some(c1 @ 'e') | Some(c1 @ 'E') => match self.input.peek_at(1) {
+        match self.lookahead(0) {
+            Some(c1 @ 'e') | Some(c1 @ 'E') => match self.lookahead(1) {
                 Some(c2) if is_digit(c2) => {
-                    self.input.consume();
-                    self.input.consume();
-                    repr.push(c1);
-                    repr.push(c2);
+                    self.advance(1);
                     is_integer = false;
-                    repr.push_str(self.consume_digits().as_str());
+                    self.consume_digits();
                 }
-                Some(c2 @ '+') | Some(c2 @ '-') => match self.input.peek_at(2) {
+                Some(c2 @ '+') | Some(c2 @ '-') => match self.lookahead(2) {
                     Some(c3) if is_digit(c3) => {
-                        self.input.consume();
-                        self.input.consume();
-                        self.input.consume();
-                        repr.push(c1);
-                        repr.push(c2);
-                        repr.push(c3);
+                        self.advance(3);
                         is_integer = false;
-                        repr.push_str(self.consume_digits().as_str());
+                        self.consume_digits();
                     }
                     _ => {}
                 }
@@ -260,51 +352,47 @@ impl<'i> Tokenizer<'i> {
 
         // TODO: Convert repr to number (f32) while constructing repr?
 
-        (repr, is_integer)
+        (&self.input[start_pos..self.position], is_integer)
     }
 
-    fn consume_digits(&mut self) -> String {
-        let mut repr = String::new();
+    fn consume_digits(&mut self) {
         loop {
-            match self.input.consume() {
+            match self.lookahead(0) {
                 Some(c) if is_digit(c) => {
-                    repr.push(c);
+                    self.advance(1);
                 }
-                _ => {
-                    self.input.reconsume_current();
-                    return repr;
-                }
+                _ => break
             }
         }
     }
 
-    /// https://www.w3.org/TR/css-syntax-3/#consume-ident-like-token
-    fn consume_identlike(&mut self) -> Token {
+    /// Consume an ident-like token.
+    fn consume_identlike(&mut self) -> Token<'i> {
         let value = self.consume_name();
 
-        if self.input.peek_at(0) == Some('(') {
+        if self.lookahead(0) == Some('(') {
             if value.eq_ignore_ascii_case("url") {
-                self.input.consume();
+                self.advance(1);
 
-                while let (Some(c1), Some(c2)) = self.input.peek_tuple(0) {
+                while let (Some(c1), Some(c2)) = self.lookahead_pair() {
                     if is_whitespace(c1) && is_whitespace(c2) {
-                        self.input.consume();
+                        self.advance(1);
                     } else {
                         break;
                     }
                 }
 
-                match self.input.peek_tuple(0) {
+                return match self.lookahead_pair() {
                     (Some('"'), _) | (Some('\''), _) => {
-                        return Token::Function { value };
+                        Token::Function { value }
                     }
                     (Some(c), Some('"')) | (Some(c), Some('\'')) if is_whitespace(c) => {
-                        return Token::Function { value };
+                        Token::Function { value }
                     }
                     _ => {
-                        return self.consume_url();
+                        self.consume_url()
                     }
-                }
+                };
             } else {
                 return Token::Function { value };
             }
@@ -313,112 +401,85 @@ impl<'i> Tokenizer<'i> {
         Token::Ident { value }
     }
 
-    /// 4.3.5. Consume a string token
-    fn consume_string(&mut self, ending: char) -> Token {
-        let mut value = String::from("");
+    /// Consume a string token.
+    ///
+    /// Precondition: next char is `"` or `'` and equals `ending`.
+    fn consume_string(&mut self, ending: char) -> Token<'i> {
+        self.advance(1);
+        match self.consume_string_tail(ending) {
+            Some(value) => Token::String { value },
+            None => Token::BadString,
+        }
+    }
+
+    fn consume_string_tail(&mut self, ending: char) -> Option<Cow<'i, str>> {
+        let start_pos = self.position;
+        let mut value_chars;
 
         loop {
-            match self.input.consume() {
+            match self.lookahead(0) {
                 Some(c) if c == ending => {
-                    return Token::String { value };
+                    self.advance(1);
+                    return Some(self.input[start_pos..self.position].borrow().into());
                 }
-                None => /* parse error */ {
-                    return Token::String { value };
+                None => {
+                    // parse error
+                    return Some(self.input[start_pos..self.position].borrow().into());
                 }
-                Some('\n') => /* parse error */ {
-                    self.input.reconsume_current();
-                    return Token::BadString;
+                Some('\n') => {
+                    // parse error
+                    return None;
                 }
                 Some('\\') => {
-                    match self.input.peek_at(0) {
-                        None => {}
-                        Some('\n') => {
-                            self.input.consume();
-                        }
-                        Some(_) => {
-                            value.push(self.consume_escaped_codepoint());
-                        }
-                    }
+                    value_chars = self.input[start_pos..self.position].to_owned();
+                    break;
                 }
-                Some(c) => {
-                    value.push(c);
+                Some(_) => {
+                    self.advance(1);
                 }
             }
         }
+
+        // TODO: Parse escaped codepoints
+        Some(Cow::from("<ESCAPE CODEPOINTS>"))
     }
 
     /// https://www.w3.org/TR/css-syntax-3/#consume-url-token
-    fn consume_url(&mut self) -> Token {
+    fn consume_url(&mut self) -> Token<'i> {
         // TODO: consume URL token
-
         Token::Url
     }
 
-    /// 4.3.7. Consume an escaped code point
-    fn consume_escaped_codepoint(&mut self) -> char {
-        match self.input.consume() {
-            Some(c) if is_hex_digit(c) => {
-                let mut digits = String::from("");
-                digits.push(c);
-
-                // Consume another 1-5 hex digits
-                for i in 1..=5 {
-                    match self.input.consume() {
-                        Some(c) if is_hex_digit(c) => digits.push(c),
-                        _ => {
-                            self.input.reconsume_current();
-                            break;
-                        }
-                    }
-                }
-
-                // If the next codepoint is whitespace, consume it as well
-                if let Some(c) = self.input.peek_at(0) {
-                    if is_whitespace(c) {
-                        self.input.consume();
-                    }
-                }
-
-                u32::from_str_radix(&digits, 16)
-                    .map(|i| core::char::from_u32(i).unwrap_or(core::char::REPLACEMENT_CHARACTER))
-                    .unwrap_or(core::char::REPLACEMENT_CHARACTER)
-            }
-            None => /* parse error */ core::char::REPLACEMENT_CHARACTER,
-            Some(c) => c,
-        }
-    }
-
     /// https://www.w3.org/TR/css-syntax-3/#consume-name
-    fn consume_name(&mut self) -> String {
-        let mut result = String::from("");
+    fn consume_name(&mut self) -> Cow<'i, str> {
+        let start_pos = self.position;
+        let mut value_chars;
+
         loop {
-            if let Some(c1) = self.input.consume() {
-                if is_name(c1) {
-                    result.push(c1);
-                    continue;
+            match self.lookahead(0) {
+                Some(c) if is_name(c) => {
+                    self.advance(1);
                 }
-                if let Some(c2) = self.input.peek_at(0) {
-                    if is_valid_escape(c1, c2) {
-                        result.push(self.consume_escaped_codepoint());
-                        continue;
-                    }
+                Some('\\') => {
+                    value_chars = self.input[start_pos..self.position].to_owned();
+                    break;
+                }
+                _ => {
+                    return self.input[start_pos..self.position].borrow().into();
                 }
             }
-
-            self.input.reconsume_current();
-            return result;
         }
+
+        // TODO: Parse escaped codepoints
+        Cow::from("<ESCAPE CODEPOINTS>")
     }
 }
 
 impl<'i> Iterator for Tokenizer<'i> {
-    type Item = Token;
+    type Item = Token<'i>;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.consume_token() {
-            Token::EOF => None,
-            token => Some(token),
-        }
+    fn next(&mut self) -> Option<Token<'i>> {
+        self.consume_token()
     }
 }
 
@@ -437,6 +498,12 @@ mod tests {
   .rules(@size) {
     border: @size solid white;
   }
+
+  @test();
+  @test[];
+  @test[param];
+
+  @test-asd: "blue";
 }
 
 .box when (#lib.colors[@primary] = blue) {
@@ -451,7 +518,7 @@ mod tests {
   }
 }
 "#;
-        let mut tokenizer = Tokenizer::new(input.chars());
+        let mut tokenizer = Tokenizer::new(input);
         for token in tokenizer {
             println!("{:?}", token);
         }
