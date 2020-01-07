@@ -42,7 +42,7 @@ fn simple_value(input: &str) -> IResult<&str, Value> {
 fn numeric(input: &str) -> IResult<&str, Value> {
     let (input, val) = number(input)?;
     let (input, unit) = opt(alt((
-        value("%".into(), char('%')),
+        map(tag("%"), |c: &str| c.into()),
         name,
     )))(input)?;
 
