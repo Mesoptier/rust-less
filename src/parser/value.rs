@@ -1,13 +1,15 @@
 use std::borrow::Cow;
 
 use nom::branch::alt;
-use nom::bytes::complete::{tag, take_while1};
-use nom::combinator::map;
+use nom::bytes::complete::{tag, take_while, take_while1};
+use nom::character::complete::char;
+use nom::combinator::{map, opt, value};
 use nom::IResult;
 use nom::multi::separated_nonempty_list;
+use nom::sequence::{pair, preceded, separated_pair};
 
 use crate::ast::*;
-use crate::parser::helpers::{is_name, is_whitespace};
+use crate::parser::helpers::{is_digit, is_name, is_whitespace};
 use crate::parser::ignore_junk;
 
 pub fn comma_list(input: &str) -> IResult<&str, Value> {
@@ -31,9 +33,75 @@ fn single_value(input: &str) -> IResult<&str, Value> {
 
 fn simple_value(input: &str) -> IResult<&str, Value> {
     alt((
-        ident,
+        numeric,
         ident,
     ))(input)
+}
+
+/// Parse a numeric value (e.g. `30`, `30px`, `30%`)
+fn numeric(input: &str) -> IResult<&str, Value> {
+    let (input, val) = number(input)?;
+    let (input, unit) = opt(alt((
+        value("%".into(), char('%')),
+        name,
+    )))(input)?;
+
+    Ok((input, Value::Number(val, unit)))
+}
+
+/// Parse a number literal.
+fn number(input: &str) -> IResult<&str, f32> {
+    // Sign
+    let (input, s) = opt_sign(input)?;
+
+    // Integer and fractional parts
+    let (input, (i, f, d)) = alt((
+        // Integer part + optional fractional part
+        map(
+            pair(dec_digits, opt(preceded(char('.'), dec_digits))),
+            |o| match o {
+                ((i, _), Some((f, d))) => (i, f, d),
+                ((i, _), None) => (i, 0, 0),
+            },
+        ),
+        // No integer part + required fractional part
+        map(
+            preceded(char('.'), dec_digits),
+            |(f, d)| (0, f, d),
+        )
+    ))(input)?;
+
+    // Exponent sign and exponent
+    let (input, (t, e)) = map(
+        opt(preceded(alt((char('e'), char('E'))), pair(opt_sign, dec_digits))),
+        |o| match o {
+            Some((t, (e, _))) => (t, e),
+            None => (1, 0),
+        },
+    )(input)?;
+
+    Ok((
+        input,
+        // See https://www.w3.org/TR/css-syntax-3/#convert-string-to-number
+        s as f32 * (i as f32 + f as f32 * 10f32.powi(-(d as i32))) * 10f32.powi(t * e as i32)
+    ))
+}
+
+fn opt_sign(input: &str) -> IResult<&str, i32> {
+    map(
+        opt(alt((char('+'), char('-')))),
+        |s| match s {
+            Some('-') => -1,
+            _ => 1,
+        },
+    )(input)
+}
+
+fn dec_digits(input: &str) -> IResult<&str, (u32, usize)> {
+    map(
+        take_while1(is_digit),
+        |digits: &str| (digits.parse().unwrap(), digits.len())
+    )(input)
 }
 
 fn ident(input: &str) -> IResult<&str, Value> {
@@ -42,4 +110,38 @@ fn ident(input: &str) -> IResult<&str, Value> {
 
 fn name<'i>(input: &'i str) -> IResult<&'i str, Cow<'i, str>> {
     map(take_while1(is_name), |s: &'i str| s.into())(input)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ast::Value;
+    use crate::parser::value::{number, numeric};
+
+    #[test]
+    fn test_numeric() {
+        let cases = vec![
+            ("42", Ok(("", Value::Number(42_f32, None)))),
+            ("42%", Ok(("", Value::Number(42_f32, Some("%".into()))))),
+            ("42px", Ok(("", Value::Number(42_f32, Some("px".into()))))),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(numeric(input), expected);
+        }
+    }
+
+    #[test]
+    fn test_number() {
+        let cases = vec![
+            ("1", Ok(("", 1_f32))),
+            ("-1", Ok(("", -1_f32))),
+            ("3.141", Ok(("", 3.141_f32))),
+            ("1.5e2", Ok(("", 150_f32))),
+            (".707", Ok(("", 0.707_f32))),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(number(input), expected);
+        }
+    }
 }
