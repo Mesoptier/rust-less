@@ -1,174 +1,110 @@
-use crate::stream::{Stream, PeekAt};
-use crate::tokenizer::Token;
+use std::borrow::Cow;
 
-#[derive(Debug)]
-pub enum Node {
-    Stylesheet {
-        rules: Vec<Node>,
-    },
-    AtRule {
-        name: String,
-        prelude: Vec<Node>,
-        block: Box<Option<Node>>,
-    },
-    Rule {},
-    Declaration {},
-    VariableDeclaration {
-        name: String,
-    },
-    VariableCall {
-        name: String,
-    },
+use nom::branch::alt;
+use nom::bytes::complete::{tag, take_while1};
+use nom::character::complete::{multispace1, char};
+use nom::combinator::{map, value};
+use nom::IResult;
+use nom::multi::{fold_many0, many0, many_till};
+use nom::sequence::{delimited, preceded, terminated};
 
-    Block {
-        value: Vec<Node>,
-    },
-    Token(Token),
+use crate::ast::*;
+use crate::parser::helpers::*;
+use crate::parser::value::*;
+
+mod helpers;
+mod value;
+
+fn junk(input: &str) -> IResult<&str, ()> {
+    fold_many0(multispace1, (), |_, _| ())(input)
 }
 
-type Tokens<L: Iterator<Item=Token>> = Stream<Token, L, [Option<Token>; 3]>;
-
-struct Parser<I> where I: Iterator<Item=Token> {
-    input: Tokens<I>,
+/// Ignore junk (whitespace / comments) surrounding the given parser
+fn ignore_junk<'i, O, F>(f: F) -> impl Fn(&'i str) -> IResult<&'i str, O>
+    where
+        F: Fn(&'i str) -> IResult<&'i str, O>,
+        O: 'i,
+{
+    move |input: &str| {
+        delimited(junk, &f, junk)(input)
+    }
 }
 
-impl<I> Parser<I> where I: Iterator<Item=Token> {
-    pub fn new(input: I) -> Self {
-        Self {
-            input: Tokens::new(input),
-        }
-    }
+pub fn parse_stylesheet(input: &str) -> IResult<&str, Stylesheet> {
+    map(parse_list_of_items, |items| Stylesheet { items })(input)
+}
 
-    pub fn parse_stylesheet(&mut self) -> Node {
-        Node::Stylesheet {
-            rules: self.consume_primary(None),
-        }
-    }
+fn parse_list_of_items(input: &str) -> IResult<&str, Vec<Item>> {
+    many0(ignore_junk(parse_item))(input)
+}
 
-    /// In LESS blocks at all levels can contain rules/declarations/etc,
-    /// so we handle those blocks with this 'primary' rule.
-    fn consume_primary(&mut self, ending: Option<Token>) -> Vec<Node> {
-        let mut rules: Vec<Node> = vec![];
+fn parse_item(input: &str) -> IResult<&str, Item> {
+    map(alt((
+        parse_at_rule,
+        parse_qualified_rule,
+    )), |kind| Item { kind })(input)
+}
 
-        loop {
-            match self.input.consume() {
-                Some(Token::Whitespace) => {}
-                t if t == ending => return rules,
-                None => /* parse error */ return rules,
-                // TODO: Handle CDO/CDC tokens (https://www.w3.org/TR/css-syntax-3/#consume-list-of-rules)
-                Some(Token::AtKeyword { .. }) => {
-                    self.input.reconsume_current();
-                    if let Some(rule) = self.consume_at_rule() {
-                        rules.push(rule);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
+fn parse_at_rule(input: &str) -> IResult<&str, ItemKind> {
+    parse_variable_declaration(input)
+}
 
-    fn consume_block(&mut self, ending: Option<Token>) -> Node {
-        Node::Block { value: self.consume_primary(ending) }
-    }
+fn parse_variable_declaration(input: &str) -> IResult<&str, ItemKind> {
+    let (input, name) = ignore_junk(tok_at_keyword)(input)?;
+    let (input, _) = char(':')(input)?;
+    let (input, value) = terminated(ignore_junk(comma_list), tag(";"))(input)?;
+    Ok((input, ItemKind::VariableDeclaration { name, value }))
+}
 
-    fn consume_at_rule(&mut self) -> Option<Node> {
-        if let Some(Token::AtKeyword { value }) = self.input.consume() {
-            // Skip whitespace
-            while let Some(Token::Whitespace) = self.input.peek_at(0) {
-                self.input.consume();
-            }
+fn parse_qualified_rule(input: &str) -> IResult<&str, ItemKind> {
+    value(ItemKind::QualifiedRule, tag("test"))(input)
+}
 
-            // @var: value;
-            // @var: { ... };
-            // @var();
-            // @var; -> error
-            // @var[...]
-            // @media ... { ... }
-            // @import ...;
-            // etc.
-            match self.input.consume() {
-                Some(Token::Colon) => self.consume_variable_declaration(value),
-                Some(Token::LeftParenthesis) => { // TODO: This is wrong! It also triggers on @media (min-width: ...) { ... }
-                    self.input.reconsume_current();
-                    self.consume_variable_call(value)
-                }
-                Some(Token::LeftSquareBracket) => {
-                    // parse error
-                    self.input.reconsume_current();
-                    None
-                }
-                _ => {
-                    self.input.reconsume_current();
-                    Some(self.consume_css_at_rule(value))
-                }
-            }
-        } else {
-            panic!();
-        }
-    }
+/// Parse a at-keyword token
+/// https://www.w3.org/TR/css-syntax-3/#consume-token
+fn tok_at_keyword(input: &str) -> IResult<&str, Cow<str>> {
+    preceded(char('@'), tok_name)(input)
+}
 
-    fn consume_variable_declaration(&mut self, name: String) -> Option<Node> {
-        Some(Node::VariableDeclaration { name })
-    }
-
-    fn consume_variable_call(&mut self, name: String) -> Option<Node> {
-        Some(Node::VariableCall { name })
-    }
-
-    /// https://www.w3.org/TR/css-syntax-3/#consume-at-rule
-    fn consume_css_at_rule(&mut self, name: String) -> Node {
-        let mut prelude: Vec<Node> = vec![];
-        let mut block: Box<Option<Node>> = Box::from(None);
-
-        loop {
-            match self.input.consume() {
-                Some(Token::Semicolon) => return Node::AtRule { name, prelude, block },
-                None => /* parse error */ return Node::AtRule { name, prelude, block },
-                Some(Token::LeftCurlyBracket) => {
-                    block = Box::from(Some(self.consume_block(Some(Token::RightCurlyBracket))));
-                    return Node::AtRule { name, prelude, block };
-                }
-                _ => {
-                    self.input.reconsume_current();
-                    prelude.push(self.consume_component_value())
-                }
-            }
-        }
-    }
-
-    fn consume_component_value(&mut self) -> Node {
-        match self.input.consume() {
-            Some(Token::LeftCurlyBracket) => self.consume_block(Some(Token::RightCurlyBracket)),
-            Some(Token::LeftSquareBracket) => self.consume_block(Some(Token::RightSquareBracket)),
-            Some(Token::LeftParenthesis) => self.consume_block(Some(Token::RightParenthesis)),
-            Some(token) => Node::Token(token),
-            None => panic!() // TODO: Handle properly
-        }
-    }
-
-    fn consume_qualified_rule(&mut self) -> Option<Node> {
-        Some(Node::Rule {})
-    }
+/// Parse a name token
+/// https://www.w3.org/TR/css-syntax-3/#consume-name
+fn tok_name(input: &str) -> IResult<&str, Cow<str>> {
+    // TODO: Parse escaped code points
+    map(take_while1(is_name), |name: &str| name.into())(input)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tokenizer::Tokenizer;
+    use crate::ast::Value::{CommaList, SpaceList, Ident};
 
     #[test]
-    fn test() {
-        let input: &str = r#"
-@var : value;
-@var();
-@var[];
-@{var} {}
-@media print {
-    color: blue;
-}
-"#;
-        let mut tokenizer = Tokenizer::new(input.chars());
-        let mut parser = Parser::new(tokenizer);
-        println!("{:#?}", parser.parse_stylesheet());
+    fn test_at_rule() {
+        let cases = vec![
+            ("@color: blue test;", Ok(("", ItemKind::VariableDeclaration {
+                name: "color".into(),
+                value: CommaList(vec![SpaceList(vec![
+                    Ident("blue".into()),
+                    Ident("test".into()),
+                ])]),
+            }))),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(parse_at_rule(input), expected);
+        }
+    }
+
+    #[test]
+    fn test_name() {
+        let cases: Vec<(&str, IResult<&str, Cow<str>>)> = vec![
+            ("a", Ok(("", "a".into()))),
+            ("name", Ok(("", "name".into()))),
+            ("with-hyphen", Ok(("", "with-hyphen".into()))),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(tok_name(input), expected);
+        }
     }
 }
