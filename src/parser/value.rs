@@ -5,7 +5,7 @@ use nom::bytes::complete::{tag, take_while, take_while1};
 use nom::character::complete::char;
 use nom::combinator::{map, opt, value};
 use nom::IResult;
-use nom::multi::separated_nonempty_list;
+use nom::multi::{separated_nonempty_list, many1};
 use nom::sequence::{pair, preceded, separated_pair};
 
 use crate::ast::*;
@@ -39,13 +39,40 @@ fn simple_value(input: &str) -> IResult<&str, Value> {
         string('"'),
         string('\''),
         // unicode_descriptor,
-        variable, // TODO: include variable_lookup?
+        variable_or_lookup,
         property,
         // url,
         // function,
         // mixin_call, // includes mixin_lookup?
         ident,
     ))(input)
+}
+
+/// Parse a variable or variable lookup (e.g. `@var`, `@var[]`)
+fn variable_or_lookup(input: &str) -> IResult<&str, Value> {
+    let (input, name) = preceded(tag("@"), name)(input)?;
+
+    if let Ok((input, lookups)) = many1(lookup)(input) {
+        return Ok((input, Value::VariableLookup(name, lookups)));
+    }
+
+    Ok((input, Value::Variable(name)))
+}
+
+/// Parse a lookup (e.g. `[]`, `[color]`, `[$@property]`)
+fn lookup(input: &str) -> IResult<&str, Lookup> {
+    let (input, _) = tag("[")(input)?;
+    let (input, lookup) = alt((
+        map(preceded(tag("$@"), name), Lookup::VariableProperty),
+        map(preceded(tag("@@"), name), Lookup::VariableVariable),
+        map(preceded(tag("$"), name), Lookup::Property),
+        map(preceded(tag("@"), name), Lookup::Variable),
+        map(name, Lookup::Ident),
+        value(Lookup::Last, tag("")),
+    ))(input)?;
+    let (input, _) = tag("]")(input)?;
+
+    Ok((input, lookup))
 }
 
 /// Parse a variable (e.g. `@var`)
@@ -140,8 +167,37 @@ fn ident(input: &str) -> IResult<&str, Value> {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::Value;
-    use crate::parser::value::{number, numeric, property, variable};
+    use crate::ast::{Value, Lookup};
+    use crate::parser::value::{number, numeric, property, variable, lookup, variable_or_lookup};
+
+    #[test]
+    fn test_variable_or_lookup() {
+        let cases = vec![
+            ("@var", Ok(("", Value::Variable("var".into())))),
+            ("@last[]", Ok(("", Value::VariableLookup("last".into(), vec![Lookup::Last])))),
+            ("@mult[][]", Ok(("", Value::VariableLookup("mult".into(), vec![Lookup::Last, Lookup::Last])))),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(variable_or_lookup(input), expected);
+        }
+    }
+
+    #[test]
+    fn test_lookup() {
+        let cases = vec![
+            ("[]", Ok(("", Lookup::Last))),
+            ("[ident]", Ok(("", Lookup::Ident("ident".into())))),
+            ("[@variable]", Ok(("", Lookup::Variable("variable".into())))),
+            ("[$property]", Ok(("", Lookup::Property("property".into())))),
+            ("[@@variable]", Ok(("", Lookup::VariableVariable("variable".into())))),
+            ("[$@property]", Ok(("", Lookup::VariableProperty("property".into())))),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(lookup(input), expected);
+        }
+    }
 
     #[test]
     fn test_variable() {

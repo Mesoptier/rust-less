@@ -48,6 +48,8 @@ pub enum Value<'i> {
 
     /// A variable reference (e.g. `@primary`)
     Variable(Cow<'i, str>),
+    /// A variable lookup (e.g. `@colors[primary]`)
+    VariableLookup(Cow<'i, str>, Vec<Lookup<'i>>),
     /// A property reference (e.g. `$color`)
     Property(Cow<'i, str>),
 
@@ -60,6 +62,22 @@ pub enum Value<'i> {
     QuotedString(Cow<'i, str>),
     /// An interpolated string (e.g. `"color is @{color}"`)
     InterpolatedString(Vec<Cow<'i, str>>, Vec<Value<'i>>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Lookup<'i> {
+    /// Lookup last declaration (e.g. `@config[]`)
+    Last,
+    /// Lookup property declaration by ident (e.g. `@config[property]`)
+    Ident(Cow<'i, str>),
+    /// Lookup variable declaration by ident (e.g. `@config[@variable]`)
+    Variable(Cow<'i, str>),
+    /// Lookup property declaration by ident (e.g. `@config[$property]`)
+    Property(Cow<'i, str>),
+    /// Lookup variable declaration by variable (e.g. `@config[@@variable]`)
+    VariableVariable(Cow<'i, str>),
+    /// Lookup property declaration by variable (e.g. `@config[$@variable]`)
+    VariableProperty(Cow<'i, str>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
