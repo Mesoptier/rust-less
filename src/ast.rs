@@ -46,10 +46,20 @@ pub enum Value<'i> {
     /// A space-separated list of values
     SpaceList(Vec<Value<'i>>),
 
+    /// A variable reference (e.g. `@primary`)
+    Variable(Cow<'i, str>),
+    /// A property reference (e.g. `$color`)
+    Property(Cow<'i, str>),
+
     /// An ident (e.g. `border-collapse`)
     Ident(Cow<'i, str>),
     /// A number (e.g. `20`, `20.5e-2`, `20%`, `20px`)
     Numeric(f32, Option<Cow<'i, str>>),
+
+    /// A quoted string (e.g. `"test"`)
+    QuotedString(Cow<'i, str>),
+    /// An interpolated string (e.g. `"color is @{color}"`)
+    InterpolatedString(Vec<Cow<'i, str>>, Vec<Value<'i>>),
 }
 
 #[derive(Clone, Debug, PartialEq)]

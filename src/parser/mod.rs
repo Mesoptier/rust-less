@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_while1};
-use nom::character::complete::{multispace1, char};
+use nom::character::complete::{char, multispace1};
 use nom::combinator::{map, value};
 use nom::IResult;
 use nom::multi::{fold_many0, many0, many_till};
@@ -14,6 +14,7 @@ use crate::parser::value::*;
 
 mod helpers;
 mod value;
+mod string;
 
 fn junk(input: &str) -> IResult<&str, ()> {
     fold_many0(multispace1, (), |_, _| ())(input)
@@ -63,20 +64,21 @@ fn parse_qualified_rule(input: &str) -> IResult<&str, ItemKind> {
 /// Parse a at-keyword token
 /// https://www.w3.org/TR/css-syntax-3/#consume-token
 fn tok_at_keyword(input: &str) -> IResult<&str, Cow<str>> {
-    preceded(char('@'), tok_name)(input)
+    preceded(char('@'), name)(input)
 }
 
 /// Parse a name token
 /// https://www.w3.org/TR/css-syntax-3/#consume-name
-fn tok_name(input: &str) -> IResult<&str, Cow<str>> {
+fn name(input: &str) -> IResult<&str, Cow<str>> {
     // TODO: Parse escaped code points
     map(take_while1(is_name), |name: &str| name.into())(input)
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::ast::Value::{CommaList, Ident, SpaceList};
+
     use super::*;
-    use crate::ast::Value::{CommaList, SpaceList, Ident};
 
     #[test]
     fn test_at_rule() {
@@ -104,7 +106,7 @@ mod tests {
         ];
 
         for (input, expected) in cases {
-            assert_eq!(tok_name(input), expected);
+            assert_eq!(name(input), expected);
         }
     }
 }

@@ -9,8 +9,9 @@ use nom::multi::separated_nonempty_list;
 use nom::sequence::{pair, preceded, separated_pair};
 
 use crate::ast::*;
+use crate::parser::{ignore_junk, name};
 use crate::parser::helpers::{is_digit, is_name, is_whitespace};
-use crate::parser::ignore_junk;
+use crate::parser::string::string;
 
 pub fn comma_list(input: &str) -> IResult<&str, Value> {
     map(
@@ -34,6 +35,9 @@ fn single_value(input: &str) -> IResult<&str, Value> {
 fn simple_value(input: &str) -> IResult<&str, Value> {
     alt((
         numeric,
+//        color,
+        string('"'),
+        string('\''),
         ident,
     ))(input)
 }
@@ -104,16 +108,12 @@ fn opt_sign(input: &str) -> IResult<&str, i32> {
 fn dec_digits(input: &str) -> IResult<&str, (u32, usize)> {
     map(
         take_while1(is_digit),
-        |digits: &str| (digits.parse().unwrap(), digits.len())
+        |digits: &str| (digits.parse().unwrap(), digits.len()),
     )(input)
 }
 
 fn ident(input: &str) -> IResult<&str, Value> {
     map(name, |name| Value::Ident(name))(input)
-}
-
-fn name<'i>(input: &'i str) -> IResult<&'i str, Cow<'i, str>> {
-    map(take_while1(is_name), |s: &'i str| s.into())(input)
 }
 
 #[cfg(test)]
