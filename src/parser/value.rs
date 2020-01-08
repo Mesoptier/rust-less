@@ -35,11 +35,33 @@ fn single_value(input: &str) -> IResult<&str, Value> {
 fn simple_value(input: &str) -> IResult<&str, Value> {
     alt((
         numeric,
-//        color,
+        // color,
         string('"'),
         string('\''),
+        // unicode_descriptor,
+        variable, // TODO: include variable_lookup?
+        property,
+        // url,
+        // function,
+        // mixin_call, // includes mixin_lookup?
         ident,
     ))(input)
+}
+
+/// Parse a variable (e.g. `@var`)
+fn variable(input: &str) -> IResult<&str, Value> {
+    map(
+        preceded(tag("@"), name),
+        |name| Value::Variable(name),
+    )(input)
+}
+
+/// Parse a property accessor (e.g. `$color`)
+fn property(input: &str) -> IResult<&str, Value> {
+    map(
+        preceded(tag("$"), name),
+        |name| Value::Property(name),
+    )(input)
 }
 
 /// Parse a numeric value (e.g. `30`, `30px`, `30%`)
@@ -119,7 +141,29 @@ fn ident(input: &str) -> IResult<&str, Value> {
 #[cfg(test)]
 mod tests {
     use crate::ast::Value;
-    use crate::parser::value::{number, numeric};
+    use crate::parser::value::{number, numeric, property, variable};
+
+    #[test]
+    fn test_variable() {
+        let cases = vec![
+            ("@var", Ok(("", Value::Variable("var".into())))),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(variable(input), expected);
+        }
+    }
+
+    #[test]
+    fn test_property() {
+        let cases = vec![
+            ("$color", Ok(("", Value::Property("color".into())))),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(property(input), expected);
+        }
+    }
 
     #[test]
     fn test_numeric() {
