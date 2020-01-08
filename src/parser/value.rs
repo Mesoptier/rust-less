@@ -46,7 +46,7 @@ fn numeric(input: &str) -> IResult<&str, Value> {
         name,
     )))(input)?;
 
-    Ok((input, Value::Number(val, unit)))
+    Ok((input, Value::Numeric(val, unit)))
 }
 
 /// Parse a number literal.
@@ -120,9 +120,9 @@ mod tests {
     #[test]
     fn test_numeric() {
         let cases = vec![
-            ("42", Ok(("", Value::Number(42_f32, None)))),
-            ("42%", Ok(("", Value::Number(42_f32, Some("%".into()))))),
-            ("42px", Ok(("", Value::Number(42_f32, Some("px".into()))))),
+            ("42", Ok(("", Value::Numeric(42_f32, None)))),
+            ("42%", Ok(("", Value::Numeric(42_f32, Some("%".into()))))),
+            ("42px", Ok(("", Value::Numeric(42_f32, Some("px".into()))))),
         ];
 
         for (input, expected) in cases {

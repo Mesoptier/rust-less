@@ -49,7 +49,7 @@ pub enum Value<'i> {
     /// An ident (e.g. `border-collapse`)
     Ident(Cow<'i, str>),
     /// A number (e.g. `20`, `20.5e-2`, `20%`, `20px`)
-    Number(f32, Option<Cow<'i, str>>),
+    Numeric(f32, Option<Cow<'i, str>>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
