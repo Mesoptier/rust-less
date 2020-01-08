@@ -87,6 +87,8 @@ fn number(input: &str) -> IResult<&str, f32> {
     ))
 }
 
+/// Parse an optional sign.
+/// Returns -1 for '-', +1 for '+', and +1 otherwise.
 fn opt_sign(input: &str) -> IResult<&str, i32> {
     map(
         opt(alt((char('+'), char('-')))),
@@ -97,6 +99,8 @@ fn opt_sign(input: &str) -> IResult<&str, i32> {
     )(input)
 }
 
+/// Parses a string of decimal digits.
+/// Returns the digits as an unsigned integer and the number of digits.
 fn dec_digits(input: &str) -> IResult<&str, (u32, usize)> {
     map(
         take_while1(is_digit),
