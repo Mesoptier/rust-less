@@ -2,30 +2,53 @@ use std::borrow::Cow;
 
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_while, take_while1};
-use nom::character::complete::char;
-use nom::combinator::{map, opt, value};
+use nom::character::complete::{char, anychar};
+use nom::combinator::{map, opt, value, not};
 use nom::IResult;
-use nom::multi::{separated_nonempty_list, many1};
-use nom::sequence::{pair, preceded, separated_pair};
+use nom::multi::{separated_nonempty_list, many1, separated_list};
+use nom::sequence::{pair, preceded, separated_pair, terminated};
 
 use crate::ast::*;
-use crate::parser::{ignore_junk, name};
+use crate::parser::{ignore_junk, name, junk0, junk1};
 use crate::parser::helpers::{is_digit, is_name, is_whitespace};
 use crate::parser::string::string;
 
-pub fn comma_list(input: &str) -> IResult<&str, Value> {
-    map(
-        separated_nonempty_list(tag(","), ignore_junk(space_list)),
-        |values| Value::CommaList(values),
-    )(input)
+pub fn variable_declaration_value(input: &str) -> IResult<&str, Value> {
+    // TODO: Use addition/sum_expression here instead of single_value
+    comma_list(space_list(single_value))(input)
 }
 
-pub fn space_list(input: &str) -> IResult<&str, Value> {
-    map(
-        // TODO: Use addition/sum_expression here instead of single_value
-        separated_nonempty_list(take_while1(is_whitespace), single_value),
-        |values| Value::SpaceList(values),
-    )(input)
+pub fn semicolon_list<'i, F>(f: F) -> impl Fn(&'i str) -> IResult<&'i str, Value<'i>>
+    where F: Fn(&'i str) -> IResult<&'i str, Value<'i>>
+{
+    move |input: &'i str| {
+        map(
+            separated_nonempty_list(tag(";"), ignore_junk(&f)),
+            |values| Value::SemicolonList(values),
+        )(input)
+    }
+}
+
+pub fn comma_list<'i, F>(f: F) -> impl Fn(&'i str) -> IResult<&'i str, Value<'i>>
+    where F: Fn(&'i str) -> IResult<&'i str, Value<'i>>
+{
+    move |input: &'i str| {
+        map(
+            separated_nonempty_list(tag(","), ignore_junk(&f)),
+            |values| Value::CommaList(values),
+        )(input)
+    }
+}
+
+pub fn space_list<'i, F>(f: F) -> impl Fn(&'i str) -> IResult<&'i str, Value<'i>>
+    where F: Fn(&'i str) -> IResult<&'i str, Value<'i>>
+{
+    move |input: &'i str| {
+        map(
+            separated_nonempty_list(junk1, &f),
+            |values| Value::SpaceList(values),
+        )(input)
+    }
 }
 
 fn single_value(input: &str) -> IResult<&str, Value> {
@@ -42,7 +65,7 @@ fn simple_value(input: &str) -> IResult<&str, Value> {
         variable_or_lookup,
         property,
         // url,
-        // function,
+        // function_call,
         // mixin_call, // includes mixin_lookup?
         ident,
     ))(input)

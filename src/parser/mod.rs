@@ -2,10 +2,10 @@ use std::borrow::Cow;
 
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_while1};
-use nom::character::complete::{char, multispace1};
+use nom::character::complete::{char, multispace1, multispace0};
 use nom::combinator::{map, value};
 use nom::IResult;
-use nom::multi::{fold_many0, many0, many_till};
+use nom::multi::{fold_many0, many0, many_till, fold_many1};
 use nom::sequence::{delimited, preceded, terminated};
 
 use crate::ast::*;
@@ -16,8 +16,12 @@ mod helpers;
 mod value;
 mod string;
 
-fn junk(input: &str) -> IResult<&str, ()> {
-    fold_many0(multispace1, (), |_, _| ())(input)
+fn junk1(input: &str) -> IResult<&str, &str> {
+    multispace1(input)
+}
+
+fn junk0(input: &str) -> IResult<&str, &str> {
+    multispace0(input)
 }
 
 /// Ignore junk (whitespace / comments) surrounding the given parser
@@ -27,7 +31,7 @@ fn ignore_junk<'i, O, F>(f: F) -> impl Fn(&'i str) -> IResult<&'i str, O>
         O: 'i,
 {
     move |input: &str| {
-        delimited(junk, &f, junk)(input)
+        delimited(junk0, &f, junk0)(input)
     }
 }
 
@@ -53,7 +57,7 @@ fn parse_at_rule(input: &str) -> IResult<&str, ItemKind> {
 fn parse_variable_declaration(input: &str) -> IResult<&str, ItemKind> {
     let (input, name) = ignore_junk(tok_at_keyword)(input)?;
     let (input, _) = char(':')(input)?;
-    let (input, value) = terminated(ignore_junk(comma_list), tag(";"))(input)?;
+    let (input, value) = terminated(ignore_junk(variable_declaration_value), tag(";"))(input)?;
     Ok((input, ItemKind::VariableDeclaration { name, value }))
 }
 

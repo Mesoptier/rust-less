@@ -41,6 +41,8 @@ pub enum ItemKind<'i> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value<'i> {
+    /// A semicolon-separated list of values
+    SemicolonList(Vec<Value<'i>>),
     /// A comma-separated list of values
     CommaList(Vec<Value<'i>>),
     /// A space-separated list of values
@@ -57,7 +59,8 @@ pub enum Value<'i> {
     Ident(Cow<'i, str>),
     /// A number (e.g. `20`, `20.5e-2`, `20%`, `20px`)
     Numeric(f32, Option<Cow<'i, str>>),
-
+    /// A function call (e.g. `rgba(0, 0, 0, 0.5)`)
+    FunctionCall(Cow<'i, str>, Box<Value<'i>>),
     /// A quoted string (e.g. `"test"`)
     QuotedString(Cow<'i, str>),
     /// An interpolated string (e.g. `"color is @{color}"`)
