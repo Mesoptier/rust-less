@@ -89,10 +89,10 @@ mod tests {
         let cases = vec![
             ("@color: blue test;", Ok(("", ItemKind::VariableDeclaration {
                 name: "color".into(),
-                value: CommaList(vec![SpaceList(vec![
+                value: SpaceList(vec![
                     Ident("blue".into()),
                     Ident("test".into()),
-                ])]),
+                ]),
             }))),
         ];
 
