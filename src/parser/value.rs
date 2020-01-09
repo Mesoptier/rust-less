@@ -2,14 +2,14 @@ use std::borrow::Cow;
 
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_while, take_while1};
-use nom::character::complete::{char, anychar};
-use nom::combinator::{map, opt, value, not};
+use nom::character::complete::{anychar, char};
+use nom::combinator::{map, not, opt, value};
 use nom::IResult;
-use nom::multi::{separated_nonempty_list, many1, separated_list};
+use nom::multi::{many1, separated_list, separated_nonempty_list};
 use nom::sequence::{pair, preceded, separated_pair, terminated};
 
 use crate::ast::*;
-use crate::parser::{ignore_junk, name, junk0, junk1};
+use crate::parser::{ignore_junk, junk0, junk1, name};
 use crate::parser::helpers::{is_digit, is_name, is_whitespace};
 use crate::parser::string::string;
 
@@ -24,7 +24,11 @@ pub fn semicolon_list<'i, F>(f: F) -> impl Fn(&'i str) -> IResult<&'i str, Value
     move |input: &'i str| {
         map(
             separated_nonempty_list(tag(";"), ignore_junk(&f)),
-            |values| Value::SemicolonList(values),
+            |mut values| if values.len() == 1 {
+                values.swap_remove(0)
+            } else {
+                Value::SemicolonList(values)
+            },
         )(input)
     }
 }
@@ -35,7 +39,11 @@ pub fn comma_list<'i, F>(f: F) -> impl Fn(&'i str) -> IResult<&'i str, Value<'i>
     move |input: &'i str| {
         map(
             separated_nonempty_list(tag(","), ignore_junk(&f)),
-            |values| Value::CommaList(values),
+            |mut values| if values.len() == 1 {
+                values.swap_remove(0)
+            } else {
+                Value::CommaList(values)
+            },
         )(input)
     }
 }
@@ -46,7 +54,11 @@ pub fn space_list<'i, F>(f: F) -> impl Fn(&'i str) -> IResult<&'i str, Value<'i>
     move |input: &'i str| {
         map(
             separated_nonempty_list(junk1, &f),
-            |values| Value::SpaceList(values),
+            |mut values| if values.len() == 1 {
+                values.swap_remove(0)
+            } else {
+                Value::SpaceList(values)
+            },
         )(input)
     }
 }
@@ -65,10 +77,32 @@ fn simple_value(input: &str) -> IResult<&str, Value> {
         variable_or_lookup,
         property,
         // url,
-        // function_call,
+        function_call,
         // mixin_call, // includes mixin_lookup?
         ident,
     ))(input)
+}
+
+/// Parse a function call (e.g. `rgb(255, 0, 255)`)
+fn function_call(input: &str) -> IResult<&str, Value> {
+    let (input, name) = terminated(name, tag("("))(input)?;
+    let (input, args) = function_args(input)?;
+    let (input, _) = tag(")")(input)?;
+    Ok((input, Value::FunctionCall(name, Box::from(args))))
+}
+
+/// Parse a function's argument list (e.g. `(255, 0, 255)`)
+fn function_args(input: &str) -> IResult<&str, Value> {
+    semicolon_list(comma_list(alt((
+        detached_ruleset,
+        space_list(single_value)
+    ))))(input)
+}
+
+/// Parse a detached ruleset (e.g. `{ color: blue; }`)
+fn detached_ruleset(input: &str) -> IResult<&str, Value> {
+    // TODO: Parse detached ruleset
+    value(Value::DetachedRuleset, tag("{}"))(input)
 }
 
 /// Parse a variable or variable lookup (e.g. `@var`, `@var[]`)
@@ -190,8 +224,27 @@ fn ident(input: &str) -> IResult<&str, Value> {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::{Value, Lookup};
-    use crate::parser::value::{number, numeric, property, variable, lookup, variable_or_lookup};
+    use crate::ast::{Lookup, Value};
+    use crate::parser::value::{function_call, lookup, number, numeric, property, variable, variable_or_lookup};
+
+    #[test]
+    fn test_function_call() {
+        let cases = vec![
+            ("rgba(255, 0, 255)", Ok(("", Value::FunctionCall("rgba".into(), Value::CommaList(vec![
+                Value::Numeric(255_f32, None),
+                Value::Numeric(0_f32, None),
+                Value::Numeric(255_f32, None),
+            ]).into())))),
+            ("repeating-linear-gradient(gold 15%, orange 30%)", Ok(("", Value::FunctionCall("repeating-linear-gradient".into(), Value::CommaList(vec![
+                Value::SpaceList(vec![Value::Ident("gold".into()), Value::Numeric(15_f32, Some("%".into()))]),
+                Value::SpaceList(vec![Value::Ident("orange".into()), Value::Numeric(30_f32, Some("%".into()))]),
+            ]).into())))),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(function_call(input), expected);
+        }
+    }
 
     #[test]
     fn test_variable_or_lookup() {

@@ -54,7 +54,8 @@ pub enum Value<'i> {
     VariableLookup(Cow<'i, str>, Vec<Lookup<'i>>),
     /// A property reference (e.g. `$color`)
     Property(Cow<'i, str>),
-
+    /// A detached ruleset (e.g. `{ color: blue; }`)
+    DetachedRuleset,
     /// An ident (e.g. `border-collapse`)
     Ident(Cow<'i, str>),
     /// A number (e.g. `20`, `20.5e-2`, `20%`, `20px`)

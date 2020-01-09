@@ -2,10 +2,10 @@ use std::borrow::Cow;
 
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_while1};
-use nom::character::complete::{char, multispace1, multispace0};
+use nom::character::complete::{char, multispace0, multispace1};
 use nom::combinator::{map, value};
 use nom::IResult;
-use nom::multi::{fold_many0, many0, many_till, fold_many1};
+use nom::multi::{fold_many0, fold_many1, many0, many_till};
 use nom::sequence::{delimited, preceded, terminated};
 
 use crate::ast::*;
