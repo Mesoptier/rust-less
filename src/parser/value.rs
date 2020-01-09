@@ -13,8 +13,14 @@ use crate::parser::{ignore_junk, junk0, junk1, name};
 use crate::parser::helpers::{is_digit, is_name, is_whitespace};
 use crate::parser::string::string;
 
+/// Parse a variable declaration's value
 pub fn variable_declaration_value(input: &str) -> IResult<&str, Value> {
     // TODO: Use addition/sum_expression here instead of single_value
+    comma_list(space_list(single_value))(input)
+}
+
+/// Parse a declaration's value
+pub fn declaration_value(input: &str) -> IResult<&str, Value> {
     comma_list(space_list(single_value))(input)
 }
 

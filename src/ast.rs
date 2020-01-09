@@ -25,7 +25,11 @@ pub enum ItemKind<'i> {
     /// A CSS qualified rule (e.g. `body > a { ... }`)
     QualifiedRule,
     /// A CSS property declaration (e.g. `color: blue;`)
-    Declaration,
+    Declaration {
+        name: Cow<'i, str>,
+        value: Value<'i>,
+        important: bool,
+    },
     /// A LESS variable declaration (e.g. `@color: blue;`)
     VariableDeclaration {
         name: Cow<'i, str>,

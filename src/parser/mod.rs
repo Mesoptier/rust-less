@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_while1};
 use nom::character::complete::{char, multispace0, multispace1};
-use nom::combinator::{map, value};
+use nom::combinator::{map, value, opt};
 use nom::IResult;
 use nom::multi::{fold_many0, fold_many1, many0, many_till};
 use nom::sequence::{delimited, preceded, terminated};
@@ -45,20 +45,42 @@ fn parse_list_of_items(input: &str) -> IResult<&str, Vec<Item>> {
 
 fn parse_item(input: &str) -> IResult<&str, Item> {
     map(alt((
-        parse_at_rule,
-        parse_qualified_rule,
+        variable_declaration,
+        declaration,
     )), |kind| Item { kind })(input)
 }
 
 fn parse_at_rule(input: &str) -> IResult<&str, ItemKind> {
-    parse_variable_declaration(input)
+    variable_declaration(input)
 }
 
-fn parse_variable_declaration(input: &str) -> IResult<&str, ItemKind> {
+/// Parse a variable declaration (e.g. `@primary: blue;`)
+fn variable_declaration(input: &str) -> IResult<&str, ItemKind> {
     let (input, name) = ignore_junk(tok_at_keyword)(input)?;
     let (input, _) = char(':')(input)?;
     let (input, value) = terminated(ignore_junk(variable_declaration_value), tag(";"))(input)?;
     Ok((input, ItemKind::VariableDeclaration { name, value }))
+}
+
+/// Parse a property declaration (e.g. `color: blue !important;`)
+fn declaration(input: &str) -> IResult<&str, ItemKind> {
+    let (input, name) = ignore_junk(name)(input)?;
+    let (input, _) = char(':')(input)?;
+    let (input, value) = ignore_junk(declaration_value)(input)?;
+    let (input, important) = ignore_junk(important)(input)?;
+    let (input, _) = char(';')(input)?;
+    Ok((input, ItemKind::Declaration { name, value, important }))
+}
+
+/// Parse an !important token
+fn important(input: &str) -> IResult<&str, bool> {
+    map(
+        opt(tag("!important")),
+        |o| match o {
+            None => false,
+            Some(_) => true,
+        },
+    )(input)
 }
 
 fn parse_qualified_rule(input: &str) -> IResult<&str, ItemKind> {
@@ -85,7 +107,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_at_rule() {
+    fn test_variable_declaration() {
         let cases = vec![
             ("@color: blue test;", Ok(("", ItemKind::VariableDeclaration {
                 name: "color".into(),
@@ -97,7 +119,27 @@ mod tests {
         ];
 
         for (input, expected) in cases {
-            assert_eq!(parse_at_rule(input), expected);
+            assert_eq!(variable_declaration(input), expected);
+        }
+    }
+
+    #[test]
+    fn test_declaration() {
+        let cases = vec![
+            ("color: blue;", Ok(("", ItemKind::Declaration {
+                name: "color".into(),
+                value: Ident("blue".into()),
+                important: false,
+            }))),
+            ("color: blue !important;", Ok(("", ItemKind::Declaration {
+                name: "color".into(),
+                value: Ident("blue".into()),
+                important: true,
+            }))),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(declaration(input), expected);
         }
     }
 
