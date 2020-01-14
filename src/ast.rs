@@ -36,7 +36,9 @@ pub enum ItemKind<'i> {
         value: Value<'i>,
     },
     /// A LESS variable call (e.g. `@ruleset();`)
-    VariableCall,
+    VariableCall {
+        name: Cow<'i, str>,
+    },
     /// A LESS mixin declaration (e.g. `.mixin(@arg) { ... }`)
     MixinDeclaration,
     /// A LESS mixin call (e.g. `.mixin(@arg: 'blue');`)

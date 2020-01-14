@@ -16,6 +16,7 @@ use crate::parser::string::string;
 /// Parse a variable declaration's value
 pub fn variable_declaration_value(input: &str) -> IResult<&str, Value> {
     // TODO: Use addition/sum_expression here instead of single_value
+    // TODO: Allow ruleset
     comma_list(space_list(single_value))(input)
 }
 

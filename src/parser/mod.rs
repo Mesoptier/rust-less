@@ -46,6 +46,7 @@ fn parse_list_of_items(input: &str) -> IResult<&str, Vec<Item>> {
 fn parse_item(input: &str) -> IResult<&str, Item> {
     map(alt((
         variable_declaration,
+        variable_call,
         declaration,
     )), |kind| Item { kind })(input)
 }
@@ -56,11 +57,19 @@ fn parse_at_rule(input: &str) -> IResult<&str, ItemKind> {
 
 /// Parse a variable declaration (e.g. `@primary: blue;`)
 fn variable_declaration(input: &str) -> IResult<&str, ItemKind> {
-    let (input, name) = ignore_junk(tok_at_keyword)(input)?;
+    let (input, name) = ignore_junk(at_keyword)(input)?;
     let (input, _) = char(':')(input)?;
     let (input, value) = ignore_junk(variable_declaration_value)(input)?;
     let (input, _) = char(';')(input)?;
     Ok((input, ItemKind::VariableDeclaration { name, value }))
+}
+
+/// Parse a variable call (e.g. `@ruleset();`)
+fn variable_call(input: &str) -> IResult<&str, ItemKind> {
+    let (input, name) = ignore_junk(at_keyword)(input)?;
+    let (input, _) = tag("()")(input)?;
+    let (input, _) = char(';')(input)?;
+    Ok((input, ItemKind::VariableCall { name }))
 }
 
 /// Parse a property declaration (e.g. `color: blue !important;`)
@@ -90,7 +99,7 @@ fn parse_qualified_rule(input: &str) -> IResult<&str, ItemKind> {
 
 /// Parse a at-keyword token
 /// https://www.w3.org/TR/css-syntax-3/#consume-token
-fn tok_at_keyword(input: &str) -> IResult<&str, Cow<str>> {
+fn at_keyword(input: &str) -> IResult<&str, Cow<str>> {
     preceded(char('@'), name)(input)
 }
 
@@ -106,6 +115,18 @@ mod tests {
     use crate::ast::Value::{CommaList, Ident, SpaceList};
 
     use super::*;
+
+    #[test]
+    fn test() {
+        let input = r#"
+            color: orange !important;
+            color: red;
+            @color: white;
+            @detached-ruleset();
+            @color: {};
+        "#;
+        println!("{:#?}", parse_stylesheet(input));
+    }
 
     #[test]
     fn test_variable_declaration() {
