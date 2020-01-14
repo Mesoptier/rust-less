@@ -58,7 +58,8 @@ fn parse_at_rule(input: &str) -> IResult<&str, ItemKind> {
 fn variable_declaration(input: &str) -> IResult<&str, ItemKind> {
     let (input, name) = ignore_junk(tok_at_keyword)(input)?;
     let (input, _) = char(':')(input)?;
-    let (input, value) = terminated(ignore_junk(variable_declaration_value), tag(";"))(input)?;
+    let (input, value) = ignore_junk(variable_declaration_value)(input)?;
+    let (input, _) = char(';')(input)?;
     Ok((input, ItemKind::VariableDeclaration { name, value }))
 }
 
