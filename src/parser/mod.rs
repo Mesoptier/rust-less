@@ -35,6 +35,7 @@ fn ignore_junk<'i, O, F>(f: F) -> impl Fn(&'i str) -> IResult<&'i str, O>
     }
 }
 
+/// Parse a LESS stylesheet.
 pub fn parse_stylesheet(input: &str) -> IResult<&str, Stylesheet> {
     map(parse_list_of_items, |items| Stylesheet { items })(input)
 }
@@ -48,11 +49,11 @@ fn parse_item(input: &str) -> IResult<&str, Item> {
         variable_declaration,
         variable_call,
         declaration,
+        // at_rule,
+        // qualified_rule,
+        mixin_declaration,
+        // mixin_call,
     )), |kind| Item { kind })(input)
-}
-
-fn parse_at_rule(input: &str) -> IResult<&str, ItemKind> {
-    variable_declaration(input)
 }
 
 /// Parse a variable declaration (e.g. `@primary: blue;`)
@@ -82,6 +83,11 @@ fn declaration(input: &str) -> IResult<&str, ItemKind> {
     Ok((input, ItemKind::Declaration { name, value, important }))
 }
 
+/// Parse a mixin declaration (e.g. `.btn() { ... }`)
+fn mixin_declaration(input: &str) -> IResult<&str, ItemKind> {
+    Ok((input, ItemKind::MixinDeclaration))
+}
+
 /// Parse an !important token
 fn important(input: &str) -> IResult<&str, bool> {
     map(
@@ -91,10 +97,6 @@ fn important(input: &str) -> IResult<&str, bool> {
             Some(_) => true,
         },
     )(input)
-}
-
-fn parse_qualified_rule(input: &str) -> IResult<&str, ItemKind> {
-    value(ItemKind::QualifiedRule, tag("test"))(input)
 }
 
 /// Parse a at-keyword token
