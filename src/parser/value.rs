@@ -1,82 +1,95 @@
-use std::borrow::Cow;
-
 use nom::branch::alt;
-use nom::bytes::complete::{tag, take_while, take_while1};
-use nom::character::complete::{anychar, char};
-use nom::combinator::{map, not, opt, value};
+use nom::combinator::{map, value, cut, opt};
 use nom::IResult;
-use nom::multi::{many1, separated_list, separated_nonempty_list};
-use nom::sequence::{pair, preceded, separated_pair, terminated};
+use nom::multi::{fold_many0, fold_many1, many1, separated_nonempty_list};
+use nom::sequence::{pair, terminated, preceded};
 
-use crate::ast::*;
-use crate::parser::{ignore_junk, junk0, junk1, name};
-use crate::parser::helpers::{is_digit, is_name, is_whitespace};
+use crate::ast::{Value, Operation, Lookup};
+use crate::lexer::{symbol, ident, at_keyword, token, name, numeric};
 use crate::parser::string::string;
+use crate::parser::block_of_items;
+use nom::bytes::complete::tag;
 
 /// Parse a variable declaration's value
 pub fn variable_declaration_value(input: &str) -> IResult<&str, Value> {
-    // TODO: Use addition/sum_expression here instead of single_value
-    // TODO: Allow ruleset
-    comma_list(space_list(single_value))(input)
+    alt((
+        detached_ruleset,
+        comma_list(space_list(sum_expression))
+    ))(input)
 }
 
 /// Parse a declaration's value
 pub fn declaration_value(input: &str) -> IResult<&str, Value> {
-    comma_list(space_list(single_value))(input)
+    comma_list(space_list(sum_expression))(input)
 }
 
 pub fn semicolon_list<'i, F>(f: F) -> impl Fn(&'i str) -> IResult<&'i str, Value<'i>>
-    where F: Fn(&'i str) -> IResult<&'i str, Value<'i>>
+    where F: Fn(&'i str) -> IResult<&'i str, Value<'i>>,
 {
     move |input: &'i str| {
         map(
-            separated_nonempty_list(tag(";"), ignore_junk(&f)),
-            |mut values| if values.len() == 1 {
-                values.swap_remove(0)
-            } else {
-                Value::SemicolonList(values)
-            },
+            separated_nonempty_list(symbol(";"), &f),
+            |values| Value::SemicolonList(values),
         )(input)
     }
 }
 
 pub fn comma_list<'i, F>(f: F) -> impl Fn(&'i str) -> IResult<&'i str, Value<'i>>
-    where F: Fn(&'i str) -> IResult<&'i str, Value<'i>>
+    where F: Fn(&'i str) -> IResult<&'i str, Value<'i>>,
 {
     move |input: &'i str| {
         map(
-            separated_nonempty_list(tag(","), ignore_junk(&f)),
-            |mut values| if values.len() == 1 {
-                values.swap_remove(0)
-            } else {
-                Value::CommaList(values)
-            },
+            separated_nonempty_list(symbol(","), &f),
+            |values| Value::CommaList(values),
         )(input)
     }
 }
 
 pub fn space_list<'i, F>(f: F) -> impl Fn(&'i str) -> IResult<&'i str, Value<'i>>
-    where F: Fn(&'i str) -> IResult<&'i str, Value<'i>>
+    where F: Fn(&'i str) -> IResult<&'i str, Value<'i>>,
 {
     move |input: &'i str| {
         map(
-            separated_nonempty_list(junk1, &f),
-            |mut values| if values.len() == 1 {
-                values.swap_remove(0)
-            } else {
-                Value::SpaceList(values)
+            many1(&f),
+            |values| Value::SpaceList(values),
+        )(input)
+    }
+}
+
+fn operation_expression<'i, F, G>(operand: F, operator: G) -> impl Fn(&'i str) -> IResult<&'i str, Value<'i>>
+    where
+        F: Fn(&'i str) -> IResult<&'i str, Value<'i>>,
+        G: Fn(&'i str) -> IResult<&'i str, Operation>,
+{
+    move |input: &'i str| {
+        let (input, first) = operand(input)?;
+        fold_many0(
+            pair(&operator, &operand),
+            first,
+            |left, (op, right)| {
+                Value::Operation(op, left.into(), right.into())
             },
         )(input)
     }
 }
 
-fn single_value(input: &str) -> IResult<&str, Value> {
-    simple_value(input)
+fn sum_expression(input: &str) -> IResult<&str, Value> {
+    operation_expression(product_expression, alt((
+        value(Operation::Add, symbol("+")),
+        value(Operation::Subtract, symbol("-")),
+    )))(input)
+}
+
+fn product_expression(input: &str) -> IResult<&str, Value> {
+    operation_expression(simple_value, alt((
+        value(Operation::Multiply, symbol("*")),
+        value(Operation::Divide, symbol("/")),
+    )))(input)
 }
 
 fn simple_value(input: &str) -> IResult<&str, Value> {
     alt((
-        numeric,
+        numeric_value,
         // color,
         string('"'),
         string('\''),
@@ -86,15 +99,15 @@ fn simple_value(input: &str) -> IResult<&str, Value> {
         // url,
         function_call,
         // mixin_call, // includes mixin_lookup?
-        ident,
+        ident_value,
     ))(input)
 }
 
 /// Parse a function call (e.g. `rgb(255, 0, 255)`)
 fn function_call(input: &str) -> IResult<&str, Value> {
-    let (input, name) = terminated(name, tag("("))(input)?;
+    let (input, name) = terminated(ident, symbol("("))(input)?;
     let (input, args) = function_args(input)?;
-    let (input, _) = tag(")")(input)?;
+    let (input, _) = symbol(")")(input)?;
     Ok((input, Value::FunctionCall(name, Box::from(args))))
 }
 
@@ -102,19 +115,19 @@ fn function_call(input: &str) -> IResult<&str, Value> {
 fn function_args(input: &str) -> IResult<&str, Value> {
     semicolon_list(comma_list(alt((
         detached_ruleset,
-        space_list(single_value)
+        space_list(simple_value)
     ))))(input)
 }
 
 /// Parse a detached ruleset (e.g. `{ color: blue; }`)
 fn detached_ruleset(input: &str) -> IResult<&str, Value> {
-    // TODO: Parse detached ruleset
-    value(Value::DetachedRuleset, tag("{}"))(input)
+    let (input, block) = block_of_items(input)?;
+    Ok((input, Value::DetachedRuleset(block)))
 }
 
 /// Parse a variable or variable lookup (e.g. `@var`, `@var[]`)
 fn variable_or_lookup(input: &str) -> IResult<&str, Value> {
-    let (input, name) = preceded(tag("@"), name)(input)?;
+    let (input, name) = at_keyword(input)?;
 
     if let Ok((input, lookups)) = many1(lookup)(input) {
         return Ok((input, Value::VariableLookup(name, lookups)));
@@ -125,114 +138,50 @@ fn variable_or_lookup(input: &str) -> IResult<&str, Value> {
 
 /// Parse a lookup (e.g. `[]`, `[color]`, `[$@property]`)
 fn lookup(input: &str) -> IResult<&str, Lookup> {
-    let (input, _) = tag("[")(input)?;
-    let (input, lookup) = alt((
-        map(preceded(tag("$@"), name), Lookup::VariableProperty),
-        map(preceded(tag("@@"), name), Lookup::VariableVariable),
-        map(preceded(tag("$"), name), Lookup::Property),
-        map(preceded(tag("@"), name), Lookup::Variable),
-        map(name, Lookup::Ident),
-        value(Lookup::Last, tag("")),
-    ))(input)?;
-    let (input, _) = tag("]")(input)?;
-
-    Ok((input, lookup))
+    let inner = alt((
+        map(token(preceded(tag("$@"), ident)), Lookup::VariableProperty),
+        map(token(preceded(tag("@@"), ident)), Lookup::VariableVariable),
+        map(token(preceded(tag("$"), ident)), Lookup::Property),
+        map(token(preceded(tag("@"), ident)), Lookup::Variable),
+        map(token(ident), Lookup::Ident),
+        value(Lookup::Last, symbol("")),
+    ));
+    preceded(symbol("["), terminated(cut(inner), symbol("]")))(input)
 }
 
 /// Parse a variable (e.g. `@var`)
 fn variable(input: &str) -> IResult<&str, Value> {
     map(
-        preceded(tag("@"), name),
-        |name| Value::Variable(name),
+        token(preceded(tag("@"), ident)),
+        Value::Variable,
     )(input)
 }
 
 /// Parse a property accessor (e.g. `$color`)
 fn property(input: &str) -> IResult<&str, Value> {
     map(
-        preceded(tag("$"), name),
-        |name| Value::Property(name),
+        token(preceded(tag("$"), ident)),
+        Value::Property,
     )(input)
 }
 
-/// Parse a numeric value (e.g. `30`, `30px`, `30%`)
-fn numeric(input: &str) -> IResult<&str, Value> {
-    let (input, val) = number(input)?;
-    let (input, unit) = opt(alt((
-        map(tag("%"), |c: &str| c.into()),
-        name,
-    )))(input)?;
-
-    Ok((input, Value::Numeric(val, unit)))
-}
-
-/// Parse a number literal.
-fn number(input: &str) -> IResult<&str, f32> {
-    // Sign
-    let (input, s) = opt_sign(input)?;
-
-    // Integer and fractional parts
-    let (input, (i, f, d)) = alt((
-        // Integer part + optional fractional part
-        map(
-            pair(dec_digits, opt(preceded(char('.'), dec_digits))),
-            |o| match o {
-                ((i, _), Some((f, d))) => (i, f, d),
-                ((i, _), None) => (i, 0, 0),
-            },
-        ),
-        // No integer part + required fractional part
-        map(
-            preceded(char('.'), dec_digits),
-            |(f, d)| (0, f, d),
-        )
-    ))(input)?;
-
-    // Exponent sign and exponent
-    let (input, (t, e)) = map(
-        opt(preceded(alt((char('e'), char('E'))), pair(opt_sign, dec_digits))),
-        |o| match o {
-            Some((t, (e, _))) => (t, e),
-            None => (1, 0),
-        },
-    )(input)?;
-
-    Ok((
-        input,
-        // See https://www.w3.org/TR/css-syntax-3/#convert-string-to-number
-        s as f32 * (i as f32 + f as f32 * 10f32.powi(-(d as i32))) * 10f32.powi(t * e as i32)
-    ))
-}
-
-/// Parse an optional sign.
-/// Returns -1 for '-', +1 for '+', and +1 otherwise.
-fn opt_sign(input: &str) -> IResult<&str, i32> {
+/// Parse a numeric value
+fn numeric_value(input: &str) -> IResult<&str, Value> {
     map(
-        opt(alt((char('+'), char('-')))),
-        |s| match s {
-            Some('-') => -1,
-            _ => 1,
-        },
+        token(numeric),
+        |(value, unit)| Value::Numeric(value, unit),
     )(input)
 }
 
-/// Parses a string of decimal digits.
-/// Returns the digits as an unsigned integer and the number of digits.
-fn dec_digits(input: &str) -> IResult<&str, (u32, usize)> {
-    map(
-        take_while1(is_digit),
-        |digits: &str| (digits.parse().unwrap(), digits.len()),
-    )(input)
-}
-
-fn ident(input: &str) -> IResult<&str, Value> {
-    map(name, |name| Value::Ident(name))(input)
+/// Consume an ident value (e.g. `inherit`)
+fn ident_value(input: &str) -> IResult<&str, Value> {
+    map(token(ident), Value::Ident)(input)
 }
 
 #[cfg(test)]
 mod tests {
     use crate::ast::{Lookup, Value};
-    use crate::parser::value::{function_call, lookup, number, numeric, property, variable, variable_or_lookup};
+    use crate::parser::value::{function_call, lookup, property, variable, variable_or_lookup};
 
     #[test]
     fn test_function_call() {
@@ -301,34 +250,6 @@ mod tests {
 
         for (input, expected) in cases {
             assert_eq!(property(input), expected);
-        }
-    }
-
-    #[test]
-    fn test_numeric() {
-        let cases = vec![
-            ("42", Ok(("", Value::Numeric(42_f32, None)))),
-            ("42%", Ok(("", Value::Numeric(42_f32, Some("%".into()))))),
-            ("42px", Ok(("", Value::Numeric(42_f32, Some("px".into()))))),
-        ];
-
-        for (input, expected) in cases {
-            assert_eq!(numeric(input), expected);
-        }
-    }
-
-    #[test]
-    fn test_number() {
-        let cases = vec![
-            ("1", Ok(("", 1_f32))),
-            ("-1", Ok(("", -1_f32))),
-            ("3.141", Ok(("", 3.141_f32))),
-            ("1.5e2", Ok(("", 150_f32))),
-            (".707", Ok(("", 0.707_f32))),
-        ];
-
-        for (input, expected) in cases {
-            assert_eq!(number(input), expected);
         }
     }
 }

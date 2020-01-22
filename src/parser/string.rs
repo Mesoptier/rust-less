@@ -9,8 +9,8 @@ use nom::IResult;
 use nom::multi::{fold_many1, many0, many1, many_till};
 use nom::sequence::{delimited, pair, terminated};
 
-use crate::ast::Value;
-use crate::parser::name;
+use crate::ast::{Value, InterpolatedValue};
+use crate::lexer::ident;
 
 /// Parse a quoted or interpolated string, starting and ending with the given `quote`.
 pub fn string(quote: char) -> impl Fn(&str) -> IResult<&str, Value> {
@@ -52,10 +52,10 @@ fn string_part(quote: char) -> impl Fn(&str) -> IResult<&str, Cow<str>> {
 }
 
 /// Parse an interpolated variable/property in a string.
-fn interpolated_part(input: &str) -> IResult<&str, Value> {
+fn interpolated_part(input: &str) -> IResult<&str, InterpolatedValue> {
     alt((
-        delimited(tag("@{"), map(name, |name| Value::Variable(name)), tag("}")),
-        delimited(tag("${"), map(name, |name| Value::Property(name)), tag("}")),
+        delimited(tag("@{"), map(ident, |name| InterpolatedValue::Variable(name)), tag("}")),
+        delimited(tag("${"), map(ident, |name| InterpolatedValue::Property(name)), tag("}")),
     ))(input)
 }
 
@@ -65,7 +65,7 @@ fn interpolated_string_tail<'i>(quote: char, first_part: Cow<'i, str>) -> impl F
         let (input, (strings, values)) = fold_many1(
             pair(interpolated_part, string_part(quote)),
             (vec![first_part], vec![]),
-            |mut acc: (Vec<Cow<str>>, Vec<Value>), item: (Value, Cow<str>)| {
+            |mut acc, item| {
                 acc.0.push(item.1);
                 acc.1.push(item.0);
                 acc
@@ -80,7 +80,7 @@ fn interpolated_string_tail<'i>(quote: char, first_part: Cow<'i, str>) -> impl F
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::Value;
+    use crate::ast::{Value, InterpolatedValue};
 
     use super::string;
 
@@ -91,8 +91,8 @@ mod tests {
             ("'test'", Ok(("", Value::QuotedString("test".into())))),
 
             // Interpolated strings
-            ("'a @{b}'", Ok(("", Value::InterpolatedString(vec!["a ".into(), "".into()], vec![Value::Variable("b".into())])))),
-            ("'${a} b'", Ok(("", Value::InterpolatedString(vec!["".into(), " b".into()], vec![Value::Property("a".into())])))),
+            ("'a @{b}'", Ok(("", Value::InterpolatedString(vec!["a ".into(), "".into()], vec![InterpolatedValue::Variable("b".into())])))),
+            ("'${a} b'", Ok(("", Value::InterpolatedString(vec!["".into(), " b".into()], vec![InterpolatedValue::Property("a".into())])))),
         ];
 
         for (input, expected) in cases {

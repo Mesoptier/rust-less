@@ -1,182 +1,118 @@
-use std::borrow::Cow;
-
 use nom::branch::alt;
-use nom::bytes::complete::{tag, take_while1};
-use nom::character::complete::{char, multispace0, multispace1};
-use nom::combinator::{map, value, opt};
+use nom::bytes::complete::tag;
+use nom::combinator::{cut, map, opt};
 use nom::IResult;
-use nom::multi::{fold_many0, fold_many1, many0, many_till};
-use nom::sequence::{delimited, preceded, terminated};
+use nom::multi::many0;
+use nom::sequence::{delimited, terminated};
 
 use crate::ast::*;
-use crate::parser::helpers::*;
-use crate::parser::value::*;
+use crate::lexer::{at_keyword, parse, symbol, token, junk, ident};
+use crate::parser::selector::{id_selector, class_selector, selector_group};
+use crate::parser::mixin::{mixin_simple_selector, mixin_selector};
+use crate::parser::value::{variable_declaration_value, declaration_value};
 
-mod helpers;
+#[cfg(test)]
+mod tests;
+
 mod value;
 mod string;
+mod selector;
+mod mixin;
 
-fn junk1(input: &str) -> IResult<&str, &str> {
-    multispace1(input)
+fn parse_stylesheet(input: &str) -> IResult<&str, Stylesheet> {
+    parse(stylesheet)(input)
 }
 
-fn junk0(input: &str) -> IResult<&str, &str> {
-    multispace0(input)
+fn stylesheet(input: &str) -> IResult<&str, Stylesheet> {
+    let (input, items) = list_of_items(input)?;
+    Ok((input, Stylesheet { items }))
 }
 
-/// Ignore junk (whitespace / comments) surrounding the given parser
-fn ignore_junk<'i, O, F>(f: F) -> impl Fn(&'i str) -> IResult<&'i str, O>
-    where
-        F: Fn(&'i str) -> IResult<&'i str, O>,
-        O: 'i,
-{
-    move |input: &str| {
-        delimited(junk0, &f, junk0)(input)
-    }
+fn block_of_items(input: &str) -> IResult<&str, Vec<Item>> {
+    delimited(
+        symbol("{"),
+        cut(list_of_items),
+        symbol("}"),
+    )(input)
 }
 
-/// Parse a LESS stylesheet.
-pub fn parse_stylesheet(input: &str) -> IResult<&str, Stylesheet> {
-    map(parse_list_of_items, |items| Stylesheet { items })(input)
+fn list_of_items(input: &str) -> IResult<&str, Vec<Item>> {
+    many0(item)(input)
 }
 
-fn parse_list_of_items(input: &str) -> IResult<&str, Vec<Item>> {
-    many0(ignore_junk(parse_item))(input)
-}
-
-fn parse_item(input: &str) -> IResult<&str, Item> {
-    map(alt((
+fn item(input: &str) -> IResult<&str, Item> {
+    // FIXME: There is a lot of backtracking going on here
+    // TODO: Support regular function calls (specifically each(...) calls)
+    alt((
+        mixin_declaration,
+        declaration,
+        mixin_call,
+        qualified_rule,
         variable_declaration,
         variable_call,
-        declaration,
-        // at_rule,
-        // qualified_rule,
-        mixin_declaration,
-        // mixin_call,
-    )), |kind| Item { kind })(input)
+//        at_rule,
+    ))(input)
 }
 
-/// Parse a variable declaration (e.g. `@primary: blue;`)
-fn variable_declaration(input: &str) -> IResult<&str, ItemKind> {
-    let (input, name) = ignore_junk(at_keyword)(input)?;
-    let (input, _) = char(':')(input)?;
-    let (input, value) = ignore_junk(variable_declaration_value)(input)?;
-    let (input, _) = char(';')(input)?;
-    Ok((input, ItemKind::VariableDeclaration { name, value }))
-}
+fn declaration(input: &str) -> IResult<&str, Item> {
+    // TODO: Parse LESS property merge syntax
 
-/// Parse a variable call (e.g. `@ruleset();`)
-fn variable_call(input: &str) -> IResult<&str, ItemKind> {
-    let (input, name) = ignore_junk(at_keyword)(input)?;
-    let (input, _) = tag("()")(input)?;
-    let (input, _) = char(';')(input)?;
-    Ok((input, ItemKind::VariableCall { name }))
-}
-
-/// Parse a property declaration (e.g. `color: blue !important;`)
-fn declaration(input: &str) -> IResult<&str, ItemKind> {
-    let (input, name) = ignore_junk(name)(input)?;
-    let (input, _) = char(':')(input)?;
-    let (input, value) = ignore_junk(declaration_value)(input)?;
-    let (input, important) = ignore_junk(important)(input)?;
-    let (input, _) = char(';')(input)?;
-    Ok((input, ItemKind::Declaration { name, value, important }))
-}
-
-/// Parse a mixin declaration (e.g. `.btn() { ... }`)
-fn mixin_declaration(input: &str) -> IResult<&str, ItemKind> {
-    Ok((input, ItemKind::MixinDeclaration))
+    let (input, name) = token(ident)(input)?;
+    let (input, _) = symbol(":")(input)?;
+    let (input, value) = declaration_value(input)?;
+    let (input, important) = important(input)?;
+    let (input, _) = symbol(";")(input)?;
+    Ok((input, Item::Declaration { name, value, important }))
 }
 
 /// Parse an !important token
 fn important(input: &str) -> IResult<&str, bool> {
-    map(
-        opt(tag("!important")),
-        |o| match o {
-            None => false,
-            Some(_) => true,
-        },
-    )(input)
+    map(opt(symbol("!important")), |o| o.is_some())(input)
 }
 
-/// Parse a at-keyword token
-/// https://www.w3.org/TR/css-syntax-3/#consume-token
-fn at_keyword(input: &str) -> IResult<&str, Cow<str>> {
-    preceded(char('@'), name)(input)
+fn qualified_rule(input: &str) -> IResult<&str, Item> {
+    // TODO: Parse guard
+
+    let (input, selector_group) = selector_group(input)?;
+    let (input, block) = block_of_items(input)?;
+    Ok((input, Item::QualifiedRule { selector_group, block }))
 }
 
-/// Parse a name token
-/// https://www.w3.org/TR/css-syntax-3/#consume-name
-fn name(input: &str) -> IResult<&str, Cow<str>> {
-    // TODO: Parse escaped code points
-    map(take_while1(is_name), |name: &str| name.into())(input)
+//fn at_rule(input: &str) -> IResult<&str, Item> {
+//    let (input, name) = at_keyword(input)?;
+//}
+
+fn mixin_declaration(input: &str) -> IResult<&str, Item> {
+    // TODO: Parse arguments
+    // TODO: Parse guard
+
+    let (input, selector) = token(mixin_simple_selector)(input)?;
+    let (input, _) = symbol("()")(input)?;
+    let (input, block) = block_of_items(input)?;
+    Ok((input, Item::MixinDeclaration { selector, block }))
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::ast::Value::{CommaList, Ident, SpaceList};
+fn mixin_call(input: &str) -> IResult<&str, Item> {
+    // TODO: Parse arguments
+    // TODO: Parse lookups
 
-    use super::*;
+    let (input, selector) = mixin_selector(input)?;
+    let (input, _) = symbol("()")(input)?;
+    let (input, _) = symbol(";")(input)?;
+    Ok((input, Item::MixinCall { selector }))
+}
 
-    #[test]
-    fn test() {
-        let input = r#"
-            color: orange !important;
-            color: red;
-            @color: white;
-            @detached-ruleset();
-            @color: {};
-        "#;
-        println!("{:#?}", parse_stylesheet(input));
-    }
+fn variable_declaration(input: &str) -> IResult<&str, Item> {
+    let (input, name) = at_keyword(input)?;
+    let (input, _) = symbol(":")(input)?;
+    let (input, value) = variable_declaration_value(input)?;
+    let (input, _) = symbol(";")(input)?;
+    Ok((input, Item::VariableDeclaration { name, value }))
+}
 
-    #[test]
-    fn test_variable_declaration() {
-        let cases = vec![
-            ("@color: blue test;", Ok(("", ItemKind::VariableDeclaration {
-                name: "color".into(),
-                value: SpaceList(vec![
-                    Ident("blue".into()),
-                    Ident("test".into()),
-                ]),
-            }))),
-        ];
-
-        for (input, expected) in cases {
-            assert_eq!(variable_declaration(input), expected);
-        }
-    }
-
-    #[test]
-    fn test_declaration() {
-        let cases = vec![
-            ("color: blue;", Ok(("", ItemKind::Declaration {
-                name: "color".into(),
-                value: Ident("blue".into()),
-                important: false,
-            }))),
-            ("color: blue !important;", Ok(("", ItemKind::Declaration {
-                name: "color".into(),
-                value: Ident("blue".into()),
-                important: true,
-            }))),
-        ];
-
-        for (input, expected) in cases {
-            assert_eq!(declaration(input), expected);
-        }
-    }
-
-    #[test]
-    fn test_name() {
-        let cases: Vec<(&str, IResult<&str, Cow<str>>)> = vec![
-            ("a", Ok(("", "a".into()))),
-            ("name", Ok(("", "name".into()))),
-            ("with-hyphen", Ok(("", "with-hyphen".into()))),
-        ];
-
-        for (input, expected) in cases {
-            assert_eq!(name(input), expected);
-        }
-    }
+fn variable_call(input: &str) -> IResult<&str, Item> {
+    let (input, name) = at_keyword(input)?;
+    let (input, _) = symbol("()")(input)?;
+    let (input, _) = symbol(";")(input)?;
+    Ok((input, Item::VariableCall { name }))
 }

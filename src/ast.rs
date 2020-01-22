@@ -2,28 +2,18 @@ use std::borrow::Cow;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Stylesheet<'i> {
-    pub items: Vec<Item<'i>>,
+    pub items: Vec<Item<'i>>
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Block<'i> {
-    pub stmts: Vec<Item<'i>>,
-}
-
-/// A statement.
-///
-/// Can be anything that is valid at the top level of a stylesheet or a qualified block.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Item<'i> {
-    pub kind: ItemKind<'i>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ItemKind<'i> {
+pub enum Item<'i> {
     /// A CSS at-rule (e.g. `@media ... { ... }`)
-    AtRule(Box<AtRule<'i>>),
+    AtRule,
     /// A CSS qualified rule (e.g. `body > a { ... }`)
-    QualifiedRule,
+    QualifiedRule {
+        selector_group: SelectorGroup<'i>,
+        block: Vec<Item<'i>>,
+    },
     /// A CSS property declaration (e.g. `color: blue;`)
     Declaration {
         name: Cow<'i, str>,
@@ -40,9 +30,25 @@ pub enum ItemKind<'i> {
         name: Cow<'i, str>,
     },
     /// A LESS mixin declaration (e.g. `.mixin(@arg) { ... }`)
-    MixinDeclaration,
+    MixinDeclaration {
+        selector: SimpleSelector<'i>,
+        block: Vec<Item<'i>>,
+    },
     /// A LESS mixin call (e.g. `.mixin(@arg: 'blue');`)
-    MixinCall,
+    MixinCall {
+        selector: Vec<SimpleSelector<'i>>,
+    },
+}
+
+
+//
+// Values
+//
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum InterpolatedValue<'i> {
+    Variable(Cow<'i, str>),
+    Property(Cow<'i, str>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -54,14 +60,18 @@ pub enum Value<'i> {
     /// A space-separated list of values
     SpaceList(Vec<Value<'i>>),
 
+    /// A detached ruleset (e.g. `{ color: blue; }`)
+    DetachedRuleset(Vec<Item<'i>>),
+
+    /// A binary operation (e.g. `2px + @spacing`)
+    Operation(Operation, Box<Value<'i>>, Box<Value<'i>>),
+
     /// A variable reference (e.g. `@primary`)
     Variable(Cow<'i, str>),
-    /// A variable lookup (e.g. `@colors[primary]`)
+    //    /// A variable lookup (e.g. `@colors[primary]`)
     VariableLookup(Cow<'i, str>, Vec<Lookup<'i>>),
     /// A property reference (e.g. `$color`)
     Property(Cow<'i, str>),
-    /// A detached ruleset (e.g. `{ color: blue; }`)
-    DetachedRuleset,
     /// An ident (e.g. `border-collapse`)
     Ident(Cow<'i, str>),
     /// A number (e.g. `20`, `20.5e-2`, `20%`, `20px`)
@@ -70,8 +80,8 @@ pub enum Value<'i> {
     FunctionCall(Cow<'i, str>, Box<Value<'i>>),
     /// A quoted string (e.g. `"test"`)
     QuotedString(Cow<'i, str>),
-    /// An interpolated string (e.g. `"color is @{color}"`)
-    InterpolatedString(Vec<Cow<'i, str>>, Vec<Value<'i>>),
+    /// An interpolated string (e.g. `"color is @{color}"`, `"color is ${color}"`)
+    InterpolatedString(Vec<Cow<'i, str>>, Vec<InterpolatedValue<'i>>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -88,41 +98,44 @@ pub enum Lookup<'i> {
     VariableVariable(Cow<'i, str>),
     /// Lookup property declaration by variable (e.g. `@config[$@variable]`)
     VariableProperty(Cow<'i, str>),
+    /// An interpolated string (e.g. `"color is @{color}"`, `"color is ${color}"`)
+    InterpolatedString(Vec<Cow<'i, str>>, Vec<InterpolatedValue<'i>>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AtRule<'i> {
-    pub kind: AtRuleKind<'i>,
+pub enum Operation {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+}
+
+
+//
+// Selectors
+//
+
+pub type SelectorGroup<'i> = Vec<Selector<'i>>;
+pub type Selector<'i> = (Vec<SimpleSelectorSequence<'i>>, Vec<Combinator>);
+pub type SimpleSelectorSequence<'i> = Vec<SimpleSelector<'i>>;
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Combinator {
+    Descendant,
+    Child,
+    NextSibling,
+    SubsequentSibling,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum AtRuleKind<'i> {
-    Media {
-        // TODO: prelude
-        block: Vec<Item<'i>>,
-    },
-    Import {
-        options: Vec<ImportOption>,
-        filename: String,
-    },
-    Plugin {
-        name: String,
-    },
-    Other {
-        name: String,
-        // TODO: What kind of items should the prelude/block consist of? Maybe just Tokens?
-        prelude: Vec<String>,
-        block: Vec<String>,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ImportOption {
-    Reference,
-    Inline,
-    LESS,
-    CSS,
-    Once,
-    Multiple,
-    Optional,
+pub enum SimpleSelector<'i> {
+    Type(Cow<'i, str>),
+    Universal,
+    Id(Cow<'i, str>),
+    Class(Cow<'i, str>),
+    Attribute(Cow<'i, str>),
+    // TODO: Support functional pseudo-classes/pseudo-elements
+    PseudoClass(Cow<'i, str>),
+    PseudoElement(Cow<'i, str>),
+    Negation(Box<SimpleSelector<'i>>),
 }
