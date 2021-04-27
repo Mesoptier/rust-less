@@ -22,7 +22,7 @@ pub fn selector(input: &str) -> IResult<&str, Selector> {
             acc.0.push(s);
             acc.1.push(c);
             acc
-        }
+        },
     ))(input)
 }
 
@@ -113,4 +113,35 @@ fn negation_selector(input: &str) -> IResult<&str, SimpleSelector> {
             )),
         )(input)?;
     Ok((input, SimpleSelector::Negation(arg.into())))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ast::{SimpleSelectorSequence, SimpleSelector};
+
+    use super::simple_selector_sequence;
+
+    #[test]
+    fn test_simple_selector() {
+        let cases = vec![
+            ("body", Ok(("", vec![SimpleSelector::Type("body".into())]))),
+            ("*", Ok(("", vec![SimpleSelector::Universal]))),
+            ("#id", Ok(("", vec![SimpleSelector::Id("id".into())]))),
+            (".class", Ok(("", vec![SimpleSelector::Class("class".into())]))),
+            (":pseudo-class", Ok(("", vec![SimpleSelector::PseudoClass("pseudo-class".into())]))),
+            ("::pseudo-element", Ok(("", vec![SimpleSelector::PseudoElement("pseudo-element".into())]))),
+
+            // Negated selectors
+            (":not(body)", Ok(("", vec![SimpleSelector::Negation(Box::from(SimpleSelector::Type("body".into())))]))),
+            (":not(*)", Ok(("", vec![SimpleSelector::Negation(Box::from(SimpleSelector::Universal))]))),
+            (":not(#id)", Ok(("", vec![SimpleSelector::Negation(Box::from(SimpleSelector::Id("id".into())))]))),
+            (":not(.class)", Ok(("", vec![SimpleSelector::Negation(Box::from(SimpleSelector::Class("class".into())))]))),
+            (":not(:pseudo-class)", Ok(("", vec![SimpleSelector::Negation(Box::from(SimpleSelector::PseudoClass("pseudo-class".into())))]))),
+            (":not(::pseudo-element)", Ok(("", vec![SimpleSelector::Negation(Box::from(SimpleSelector::PseudoElement("pseudo-element".into())))]))),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(simple_selector_sequence(input), expected);
+        }
+    }
 }
