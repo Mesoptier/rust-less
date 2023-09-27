@@ -68,7 +68,7 @@ pub enum Value<'i> {
 
     /// A variable reference (e.g. `@primary`)
     Variable(Cow<'i, str>),
-    //    /// A variable lookup (e.g. `@colors[primary]`)
+    /// A variable lookup (e.g. `@colors[primary]`)
     VariableLookup(Cow<'i, str>, Vec<Lookup<'i>>),
     /// A property reference (e.g. `$color`)
     Property(Cow<'i, str>),
