@@ -13,7 +13,7 @@ pub fn mixin_selector(input: &str) -> IResult<&str, Vec<SimpleSelector>> {
 
     token(fold_many0(
         preceded(mixin_combinator, mixin_simple_selector),
-        vec![first],
+        move || vec![first.clone()],
         |mut acc, item| {
             acc.push(item);
             acc

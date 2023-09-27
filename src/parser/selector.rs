@@ -2,7 +2,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{cut, value};
 use nom::IResult;
-use nom::multi::{fold_many0, separated_nonempty_list};
+use nom::multi::{fold_many0, separated_list1};
 use nom::sequence::{pair, preceded, terminated};
 
 use crate::ast::{Combinator, Selector, SelectorGroup, SimpleSelector, SimpleSelectorSequence};
@@ -10,14 +10,14 @@ use crate::lexer::{ident, name, parse, symbol, token};
 use crate::lexer::junk::junk1;
 
 pub fn selector_group(input: &str) -> IResult<&str, SelectorGroup> {
-    separated_nonempty_list(symbol(","), selector)(input)
+    separated_list1(symbol(","), selector)(input)
 }
 
 pub fn selector(input: &str) -> IResult<&str, Selector> {
     let (input, first) = simple_selector_sequence(input)?;
     token(fold_many0(
         pair(combinator, simple_selector_sequence),
-        (vec![first], vec![]),
+        move || (vec![first.clone()], vec![]),
         |mut acc, (c, s)| {
             acc.0.push(s);
             acc.1.push(c);
@@ -58,7 +58,7 @@ pub fn simple_selector_sequence(input: &str) -> IResult<&str, SimpleSelectorSequ
             pseudo_element_selector,
             pseudo_class_selector,
         )),
-        vec![first],
+        move || vec![first.clone()],
         |mut acc: Vec<_>, item| {
             acc.push(item);
             acc
@@ -117,7 +117,7 @@ fn negation_selector(input: &str) -> IResult<&str, SimpleSelector> {
 #[cfg(test)]
 mod tests {
     use nom::Err::Failure;
-    use nom::error::ErrorKind;
+    use nom::error::{ErrorKind, ParseError};
 
     use crate::ast::SimpleSelector::*;
 
@@ -168,7 +168,7 @@ mod tests {
             ),
             (
                 ":not(body.class)",
-                Err(Failure((".class)", ErrorKind::Tag))),
+                Err(Failure(ParseError::from_error_kind(".class)", ErrorKind::Tag))),
             ),
         ];
 

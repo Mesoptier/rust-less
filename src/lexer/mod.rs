@@ -1,11 +1,10 @@
 use std::borrow::Cow;
 
+use nom::{IResult, Parser};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take_while1};
 use nom::combinator::{map, opt};
-use nom::Err::Error;
-use nom::error::ErrorKind;
-use nom::IResult;
+use nom::error::Error;
 use nom::sequence::{pair, preceded, terminated};
 
 use crate::lexer::helpers::{is_digit, is_name, would_start_identifier};
@@ -18,33 +17,25 @@ mod helpers;
 mod tests;
 
 /// Removes junk before applying a parser `f`.
-pub fn parse<'i, O, F>(f: F) -> impl Fn(&'i str) -> IResult<&'i str, O>
+pub fn parse<'a, F, O>(f: F) -> impl FnMut(&'a str) -> IResult<&str, O, Error<&str>>
     where
-        O: 'i,
-        F: Fn(&'i str) -> IResult<&'i str, O>,
+        F: Parser<&'a str, O, Error<&'a str>>,
 {
-    move |input: &'i str| {
-        preceded(junk::junk0, &f)(input)
-    }
+    preceded(junk::junk0, f)
 }
 
 /// Removes junk after applying a parser `f`.
-pub fn token<'i, O, F>(f: F) -> impl Fn(&'i str) -> IResult<&'i str, O>
+pub fn token<'a, F, O>(f: F) -> impl FnMut(&'a str) -> IResult<&str, O, Error<&str>>
     where
-        O: 'i,
-        F: Fn(&'i str) -> IResult<&'i str, O>,
+        F: Parser<&'a str, O, Error<&'a str>>,
 {
-    move |input: &'i str| {
-        terminated(&f, junk::junk0)(input)
-    }
+    terminated(f, junk::junk0)
 }
 
 /// Removes junk after matching the string `xs`.
-pub fn symbol<'i>(xs: &'static str) -> impl Fn(&'i str) -> IResult<&'i str, &'i str>
+pub fn symbol<'a>(xs: &'static str) -> impl FnMut(&'a str) -> IResult<&str, &str>
 {
-    move |input: &'i str| {
-        token(tag(xs))(input)
-    }
+    token(tag(xs))
 }
 
 pub fn name(input: &str) -> IResult<&str, Cow<str>> {

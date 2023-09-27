@@ -39,6 +39,7 @@ pub fn junk1(input: &str) -> IResult<&str, ()> {
 mod tests {
     use nom::Err::Failure;
     use nom::error::ErrorKind::TakeUntil;
+    use nom::error::ParseError;
 
     use super::*;
 
@@ -73,7 +74,7 @@ mod tests {
         let cases = vec![
             ("/**/", Ok(("", ()))),
             ("/* multiline \n comment */", Ok(("", ()))),
-            ("/* eof", Err(Failure((" eof", TakeUntil)))),
+            ("/* eof", Err(Failure(ParseError::from_error_kind(" eof", TakeUntil)))),
         ];
 
         for (input, expected) in cases {

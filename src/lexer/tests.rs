@@ -1,4 +1,8 @@
-use super::*;
+use nom::bytes::complete::tag;
+use nom::Err::Error;
+use nom::error::{ErrorKind, ParseError};
+
+use crate::lexer::{at_keyword, ident, number, numeric, symbol, token};
 
 #[test]
 fn test_token() {
@@ -10,10 +14,7 @@ fn test_token() {
 
 #[test]
 fn test_symbol() {
-    assert_eq!(
-        symbol("test")("test  /* foo */ // bar"),
-        Ok(("", "test"))
-    );
+    assert_eq!(symbol("test")("test  /* foo */ // bar"), Ok(("", "test")));
 }
 
 #[test]
@@ -23,7 +24,10 @@ fn test_name() {
         ("name rest", Ok((" rest", "name".into()))),
         ("-name", Ok(("", "-name".into()))),
         ("--name", Ok(("", "--name".into()))),
-        ("-0", Err(Error(("-0", ErrorKind::Fix)))),
+        (
+            "-0",
+            Err(Error(ParseError::from_error_kind("-0", ErrorKind::Fail))),
+        ),
     ];
 
     for (input, expected) in cases {

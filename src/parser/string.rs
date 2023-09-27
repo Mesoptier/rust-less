@@ -64,7 +64,7 @@ fn interpolated_string_tail<'i>(quote: char, first_part: Cow<'i, str>) -> impl F
     move |input: &'i str| {
         let (input, (strings, values)) = fold_many1(
             pair(interpolated_part, string_part(quote)),
-            (vec![first_part], vec![]),
+            || (vec![first_part.clone()], vec![]),
             |mut acc, item| {
                 acc.0.push(item.1);
                 acc.1.push(item.0);
