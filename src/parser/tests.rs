@@ -2,6 +2,12 @@ use crate::parser::value::declaration_value;
 
 use super::*;
 
+macro_rules! selector_group {
+    ( $input:expr ) => {
+        selector_group($input).unwrap().1
+    };
+}
+
 #[test]
 fn test_stylesheet() {
     let input = r#"
@@ -83,12 +89,7 @@ fn test_qualified_rule() {
         Ok((
             "",
             Item::QualifiedRule {
-                selector_group: SelectorGroup(vec![Selector(
-                    vec![SimpleSelectorSequence(vec![SimpleSelector::Type(
-                        "a".into()
-                    )])],
-                    vec![]
-                )]),
+                selector_group: selector_group!("a"),
                 block: GuardedBlock {
                     guard: None,
                     items: vec![Item::Declaration {
@@ -108,12 +109,7 @@ fn test_qualified_rule() {
         Ok((
             "",
             Item::QualifiedRule {
-                selector_group: SelectorGroup(vec![Selector(
-                    vec![SimpleSelectorSequence(vec![SimpleSelector::Type(
-                        "a".into()
-                    )])],
-                    vec![]
-                )]),
+                selector_group: selector_group!("a"),
                 block: GuardedBlock {
                     guard: Some(Guard),
                     items: vec![]
