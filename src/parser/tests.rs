@@ -34,7 +34,43 @@ fn test_stylesheet() {
 #[test]
 fn test_selector() {
     let input = "body.class#id:pseudo:not(.not)::pseudo-elem > test + test test~test, a";
-    println!("{:?}", selector_group(input));
+
+    assert_eq!(
+        selector_group(input),
+        Ok((
+            "",
+            SelectorGroup(vec![
+                Selector(
+                    vec![
+                        SimpleSelectorSequence(vec![
+                            SimpleSelector::Type("body".into()),
+                            SimpleSelector::Class("class".into()),
+                            SimpleSelector::Id("id".into()),
+                            SimpleSelector::PseudoClass("pseudo".into()),
+                            SimpleSelector::Negation(SimpleSelector::Class("not".into()).into()),
+                            SimpleSelector::PseudoElement("pseudo-elem".into()),
+                        ]),
+                        SimpleSelectorSequence(vec![SimpleSelector::Type("test".into())]),
+                        SimpleSelectorSequence(vec![SimpleSelector::Type("test".into())]),
+                        SimpleSelectorSequence(vec![SimpleSelector::Type("test".into())]),
+                        SimpleSelectorSequence(vec![SimpleSelector::Type("test".into())]),
+                    ],
+                    vec![
+                        Combinator::Child,
+                        Combinator::NextSibling,
+                        Combinator::Descendant,
+                        Combinator::SubsequentSibling
+                    ]
+                ),
+                Selector(
+                    vec![SimpleSelectorSequence(vec![SimpleSelector::Type(
+                        "a".into()
+                    )])],
+                    vec![]
+                )
+            ])
+        ))
+    );
 }
 
 #[test]

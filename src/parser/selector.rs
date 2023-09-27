@@ -1,6 +1,6 @@
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
-use nom::combinator::{cut, value};
+use nom::combinator::{cut, into, value};
 use nom::IResult;
 use nom::multi::{fold_many0, separated_list1};
 use nom::sequence::{pair, preceded, terminated};
@@ -10,12 +10,12 @@ use crate::lexer::{ident, name, parse, symbol, token};
 use crate::lexer::junk::junk1;
 
 pub fn selector_group(input: &str) -> IResult<&str, SelectorGroup> {
-    separated_list1(symbol(","), selector)(input)
+    into(separated_list1(symbol(","), selector))(input)
 }
 
 pub fn selector(input: &str) -> IResult<&str, Selector> {
     let (input, first) = simple_selector_sequence(input)?;
-    token(fold_many0(
+    token(into(fold_many0(
         pair(combinator, simple_selector_sequence),
         move || (vec![first.clone()], vec![]),
         |mut acc, (c, s)| {
@@ -23,7 +23,7 @@ pub fn selector(input: &str) -> IResult<&str, Selector> {
             acc.1.push(c);
             acc
         },
-    ))(input)
+    )))(input)
 }
 
 /// Consume a combinator (e.g. `>`, `+`, `~`, ` `)
@@ -50,7 +50,7 @@ pub fn simple_selector_sequence(input: &str) -> IResult<&str, SimpleSelectorSequ
         pseudo_class_selector,
     ))(input)?;
 
-    fold_many0(
+    into(fold_many0(
         alt((
             id_selector,
             class_selector,
@@ -63,7 +63,7 @@ pub fn simple_selector_sequence(input: &str) -> IResult<&str, SimpleSelectorSequ
             acc.push(item);
             acc
         },
-    )(input)
+    ))(input)
 }
 
 fn type_selector(input: &str) -> IResult<&str, SimpleSelector> {
@@ -126,44 +126,44 @@ mod tests {
     #[test]
     fn test_simple_selector() {
         let cases = vec![
-            ("body", Ok(("", vec![Type("body".into())]))),
-            ("*", Ok(("", vec![Universal]))),
-            ("#id", Ok(("", vec![Id("id".into())]))),
-            (".class", Ok(("", vec![Class("class".into())]))),
+            ("body", Ok(("", vec![Type("body".into())].into()))),
+            ("*", Ok(("", vec![Universal].into()))),
+            ("#id", Ok(("", vec![Id("id".into())].into()))),
+            (".class", Ok(("", vec![Class("class".into())].into()))),
             (
                 ":pseudo-class",
-                Ok(("", vec![PseudoClass("pseudo-class".into())])),
+                Ok(("", vec![PseudoClass("pseudo-class".into())].into())),
             ),
             (
                 "::pseudo-element",
-                Ok(("", vec![PseudoElement("pseudo-element".into())])),
+                Ok(("", vec![PseudoElement("pseudo-element".into())].into())),
             ),
             // Negated selectors
             (
                 ":not(body)",
-                Ok(("", vec![Negation(Box::from(Type("body".into())))])),
+                Ok(("", vec![Negation(Box::from(Type("body".into())))].into())),
             ),
-            (":not(*)", Ok(("", vec![Negation(Box::from(Universal))]))),
+            (":not(*)", Ok(("", vec![Negation(Box::from(Universal))].into()))),
             (
                 ":not(#id)",
-                Ok(("", vec![Negation(Box::from(Id("id".into())))])),
+                Ok(("", vec![Negation(Box::from(Id("id".into())))].into())),
             ),
             (
                 ":not(.class)",
-                Ok(("", vec![Negation(Box::from(Class("class".into())))])),
+                Ok(("", vec![Negation(Box::from(Class("class".into())))].into())),
             ),
             (
                 ":not(:pseudo-class)",
                 Ok((
                     "",
-                    vec![Negation(Box::from(PseudoClass("pseudo-class".into())))],
+                    vec![Negation(Box::from(PseudoClass("pseudo-class".into())))].into(),
                 )),
             ),
             (
                 ":not(::pseudo-element)",
                 Ok((
                     "",
-                    vec![Negation(Box::from(PseudoElement("pseudo-element".into())))],
+                    vec![Negation(Box::from(PseudoElement("pseudo-element".into())))].into(),
                 )),
             ),
             (
@@ -182,11 +182,11 @@ mod tests {
         let cases = vec![
             (
                 "body.class",
-                Ok(("", vec![Type("body".into()), Class("class".into())])),
+                Ok(("", vec![Type("body".into()), Class("class".into())].into())),
             ),
             (
                 "body:pseudo",
-                Ok(("", vec![Type("body".into()), PseudoClass("pseudo".into())])),
+                Ok(("", vec![Type("body".into()), PseudoClass("pseudo".into())].into())),
             ),
             (
                 "body:not(:pseudo)",
@@ -195,7 +195,7 @@ mod tests {
                     vec![
                         Type("body".into()),
                         Negation(Box::from(PseudoClass("pseudo".into()))),
-                    ],
+                    ].into(),
                 )),
             ),
         ];

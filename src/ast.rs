@@ -115,9 +115,33 @@ pub enum Operation {
 // Selectors
 //
 
-pub type SelectorGroup<'i> = Vec<Selector<'i>>;
-pub type Selector<'i> = (Vec<SimpleSelectorSequence<'i>>, Vec<Combinator>);
-pub type SimpleSelectorSequence<'i> = Vec<SimpleSelector<'i>>;
+#[derive(Clone, Debug, PartialEq)]
+pub struct SelectorGroup<'i>(pub Vec<Selector<'i>>);
+impl<'i> From<Vec<Selector<'i>>> for SelectorGroup<'i> {
+    fn from(value: Vec<Selector<'i>>) -> Self {
+        assert_ne!(value.len(), 0);
+        Self(value)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Selector<'i>(pub Vec<SimpleSelectorSequence<'i>>, pub Vec<Combinator>);
+impl<'i> From<(Vec<SimpleSelectorSequence<'i>>, Vec<Combinator>)> for Selector<'i> {
+    fn from(value: (Vec<SimpleSelectorSequence<'i>>, Vec<Combinator>)) -> Self {
+        assert_ne!(value.0.len(), 0);
+        assert_eq!(value.0.len(), value.1.len() + 1);
+        Self(value.0, value.1)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SimpleSelectorSequence<'i>(pub Vec<SimpleSelector<'i>>);
+impl<'i> From<Vec<SimpleSelector<'i>>> for SimpleSelectorSequence<'i> {
+    fn from(value: Vec<SimpleSelector<'i>>) -> Self {
+        assert_ne!(value.len(), 0);
+        Self(value)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Combinator {
