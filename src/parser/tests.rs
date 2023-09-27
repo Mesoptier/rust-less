@@ -31,6 +31,46 @@ fn test_stylesheet() {
 }
 
 #[test]
+fn test_qualified_rule() {
+    assert_eq!(
+        qualified_rule("a { color: blue; }"),
+        Ok((
+            "",
+            Item::QualifiedRule {
+                selector_group: SelectorGroup(vec![Selector(
+                    vec![SimpleSelectorSequence(vec![SimpleSelector::Type(
+                        "a".into()
+                    )])],
+                    vec![]
+                )]),
+                block: vec![Item::Declaration {
+                    name: "color".into(),
+                    value: Value::CommaList(vec![Value::SpaceList(vec![Value::Ident(
+                        "blue".into()
+                    )])]),
+                    important: false,
+                }]
+            }
+        ))
+    )
+}
+
+#[test]
+fn test_declaration() {
+    assert_eq!(
+        declaration("color: blue;"),
+        Ok((
+            "",
+            Item::Declaration {
+                name: "color".into(),
+                value: Value::CommaList(vec![Value::SpaceList(vec![Value::Ident("blue".into())])]),
+                important: false,
+            }
+        ))
+    );
+}
+
+#[test]
 fn test_declaration_value() {
     assert_eq!(
         declaration_value("0 * 0 + 0 / 0"),
