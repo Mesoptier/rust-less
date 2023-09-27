@@ -119,7 +119,9 @@ mod tests {
     use nom::Err::Failure;
     use nom::error::{ErrorKind, ParseError};
 
+    use crate::ast::{Combinator, Selector, SelectorGroup, SimpleSelectorSequence};
     use crate::ast::SimpleSelector::*;
+    use crate::parser::selector::selector_group;
 
     use super::simple_selector_sequence;
 
@@ -204,4 +206,47 @@ mod tests {
             assert_eq!(simple_selector_sequence(input), expected);
         }
     }
+
+    #[test]
+    fn test_selector() {
+        let input = "body.class#id:pseudo:not(.not)::pseudo-elem > test + test test~test, a";
+
+        assert_eq!(
+            selector_group(input),
+            Ok((
+                "",
+                SelectorGroup(vec![
+                    Selector(
+                        vec![
+                            SimpleSelectorSequence(vec![
+                                Type("body".into()),
+                                Class("class".into()),
+                                Id("id".into()),
+                                PseudoClass("pseudo".into()),
+                                Negation(Class("not".into()).into()),
+                                PseudoElement("pseudo-elem".into()),
+                            ]),
+                            SimpleSelectorSequence(vec![Type("test".into())]),
+                            SimpleSelectorSequence(vec![Type("test".into())]),
+                            SimpleSelectorSequence(vec![Type("test".into())]),
+                            SimpleSelectorSequence(vec![Type("test".into())]),
+                        ],
+                        vec![
+                            Combinator::Child,
+                            Combinator::NextSibling,
+                            Combinator::Descendant,
+                            Combinator::SubsequentSibling
+                        ]
+                    ),
+                    Selector(
+                        vec![SimpleSelectorSequence(vec![Type(
+                            "a".into()
+                        )])],
+                        vec![]
+                    )
+                ])
+            ))
+        );
+    }
+
 }
