@@ -101,7 +101,26 @@ fn test_qualified_rule() {
                 }
             }
         ))
-    )
+    );
+
+    assert_eq!(
+        qualified_rule("a when (true) { }"),
+        Ok((
+            "",
+            Item::QualifiedRule {
+                selector_group: SelectorGroup(vec![Selector(
+                    vec![SimpleSelectorSequence(vec![SimpleSelector::Type(
+                        "a".into()
+                    )])],
+                    vec![]
+                )]),
+                block: GuardedBlock {
+                    guard: Some(Guard),
+                    items: vec![]
+                }
+            }
+        ))
+    );
 }
 
 #[test]
