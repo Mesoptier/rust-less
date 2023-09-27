@@ -1,12 +1,12 @@
 use nom::branch::alt;
 use nom::combinator::{opt, value};
 use nom::IResult;
-use nom::multi::{separated_nonempty_list, fold_many0};
+use nom::multi::fold_many0;
+use nom::sequence::preceded;
 
 use crate::ast::SimpleSelector;
 use crate::lexer::{parse, symbol, token};
 use crate::parser::selector::{class_selector, id_selector};
-use nom::sequence::preceded;
 
 pub fn mixin_selector(input: &str) -> IResult<&str, Vec<SimpleSelector>> {
     let (input, first) = token(mixin_simple_selector)(input)?;
@@ -17,7 +17,7 @@ pub fn mixin_selector(input: &str) -> IResult<&str, Vec<SimpleSelector>> {
         |mut acc, item| {
             acc.push(item);
             acc
-        }
+        },
     ))(input)
 }
 

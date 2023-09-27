@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Stylesheet<'i> {
-    pub items: Vec<Item<'i>>
+    pub items: Vec<Item<'i>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

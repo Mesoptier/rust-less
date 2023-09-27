@@ -1,15 +1,15 @@
 use std::borrow::Cow;
 
 use nom::branch::alt;
-use nom::bytes::complete::{tag, take_till};
+use nom::bytes::complete::tag;
 use nom::character::complete::{anychar, char};
-use nom::combinator::{map, not, peek, recognize};
+use nom::combinator::{map, peek, recognize};
 use nom::error::ErrorKind;
 use nom::IResult;
-use nom::multi::{fold_many1, many0, many1, many_till};
-use nom::sequence::{delimited, pair, terminated};
+use nom::multi::{fold_many1, many_till};
+use nom::sequence::{delimited, pair};
 
-use crate::ast::{Value, InterpolatedValue};
+use crate::ast::{InterpolatedValue, Value};
 use crate::lexer::ident;
 
 /// Parse a quoted or interpolated string, starting and ending with the given `quote`.
@@ -80,7 +80,7 @@ fn interpolated_string_tail<'i>(quote: char, first_part: Cow<'i, str>) -> impl F
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::{Value, InterpolatedValue};
+    use crate::ast::{InterpolatedValue, Value};
 
     use super::string;
 

@@ -1,6 +1,7 @@
-use super::*;
-use crate::parser::selector::{selector, selector_group};
+use crate::parser::selector::selector_group;
 use crate::parser::value::declaration_value;
+
+use super::*;
 
 #[test]
 fn test_stylesheet() {

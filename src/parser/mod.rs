@@ -1,15 +1,14 @@
 use nom::branch::alt;
-use nom::bytes::complete::tag;
 use nom::combinator::{cut, map, opt};
 use nom::IResult;
 use nom::multi::many0;
-use nom::sequence::{delimited, terminated};
+use nom::sequence::delimited;
 
 use crate::ast::*;
-use crate::lexer::{at_keyword, parse, symbol, token, junk, ident};
-use crate::parser::selector::{id_selector, class_selector, selector_group};
-use crate::parser::mixin::{mixin_simple_selector, mixin_selector};
-use crate::parser::value::{variable_declaration_value, declaration_value};
+use crate::lexer::{at_keyword, ident, parse, symbol, token};
+use crate::parser::mixin::{mixin_selector, mixin_simple_selector};
+use crate::parser::selector::selector_group;
+use crate::parser::value::{declaration_value, variable_declaration_value};
 
 #[cfg(test)]
 mod tests;

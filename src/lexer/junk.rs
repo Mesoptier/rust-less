@@ -1,9 +1,9 @@
-use nom::IResult;
-use nom::bytes::complete::{tag, take_until, take_while};
-use nom::multi::{many0, many1};
 use nom::branch::alt;
-use nom::combinator::{cut, value};
+use nom::bytes::complete::{tag, take_until, take_while};
 use nom::character::complete::multispace1;
+use nom::combinator::{cut, value};
+use nom::IResult;
+use nom::multi::{many0, many1};
 
 fn whitespace(input: &str) -> IResult<&str, ()> {
     let (input, _) = multispace1(input)?;
@@ -37,9 +37,10 @@ pub fn junk1(input: &str) -> IResult<&str, ()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use nom::Err::{Failure};
+    use nom::Err::Failure;
     use nom::error::ErrorKind::TakeUntil;
+
+    use super::*;
 
     #[test]
     fn test_whitespace() {
@@ -79,5 +80,4 @@ mod tests {
             assert_eq!(block_comment(input), expected);
         }
     }
-
 }

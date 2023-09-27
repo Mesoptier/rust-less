@@ -1,14 +1,14 @@
 use nom::branch::alt;
-use nom::combinator::{map, value, cut, opt};
-use nom::IResult;
-use nom::multi::{fold_many0, fold_many1, many1, separated_nonempty_list};
-use nom::sequence::{pair, terminated, preceded};
-
-use crate::ast::{Value, Operation, Lookup};
-use crate::lexer::{symbol, ident, at_keyword, token, name, numeric};
-use crate::parser::string::string;
-use crate::parser::block_of_items;
 use nom::bytes::complete::tag;
+use nom::combinator::{cut, map, value};
+use nom::IResult;
+use nom::multi::{fold_many0, many1, separated_nonempty_list};
+use nom::sequence::{pair, preceded, terminated};
+
+use crate::ast::{Lookup, Operation, Value};
+use crate::lexer::{at_keyword, ident, numeric, symbol, token};
+use crate::parser::block_of_items;
+use crate::parser::string::string;
 
 /// Parse a variable declaration's value
 pub fn variable_declaration_value(input: &str) -> IResult<&str, Value> {

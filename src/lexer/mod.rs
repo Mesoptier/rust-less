@@ -1,15 +1,15 @@
 use std::borrow::Cow;
 
-use nom::bytes::complete::{tag, take_while, take_while1, tag_no_case};
+use nom::branch::alt;
+use nom::bytes::complete::{tag, tag_no_case, take_while1};
 use nom::combinator::{map, opt};
 use nom::Err::Error;
 use nom::error::ErrorKind;
 use nom::IResult;
-use nom::sequence::{preceded, terminated, pair};
+use nom::sequence::{pair, preceded, terminated};
 
-use crate::lexer::helpers::{is_name, would_start_identifier, is_digit};
+use crate::lexer::helpers::{is_digit, is_name, would_start_identifier};
 use crate::util::peek_pred;
-use nom::branch::alt;
 
 pub mod junk;
 mod helpers;
@@ -69,7 +69,7 @@ pub fn numeric(input: &str) -> IResult<&str, (f32, Option<Cow<str>>)> {
         opt(alt((
             map(tag("%"), |c: &str| c.into()),
             name,
-        )))
+        ))),
     )(input)
 }
 
