@@ -31,6 +31,30 @@ fn test_stylesheet() {
 }
 
 #[test]
+fn test_mixin_declaration() {
+    assert_eq!(
+        mixin_declaration("#lib() { }"),
+        Ok((
+            "",
+            Item::MixinDeclaration {
+                selector: SimpleSelector::Id("lib".into()),
+                block: vec![],
+            },
+        ))
+    );
+    assert_eq!(
+        mixin_declaration(".test () { }"),
+        Ok((
+            "",
+            Item::MixinDeclaration {
+                selector: SimpleSelector::Class("test".into()),
+                block: vec![],
+            },
+        ))
+    );
+}
+
+#[test]
 fn test_qualified_rule() {
     assert_eq!(
         qualified_rule("a { color: blue; }"),
