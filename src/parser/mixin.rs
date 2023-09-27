@@ -1,8 +1,8 @@
 use nom::branch::alt;
 use nom::combinator::{opt, value};
-use nom::IResult;
 use nom::multi::fold_many0;
 use nom::sequence::preceded;
+use nom::IResult;
 
 use crate::ast::SimpleSelector;
 use crate::lexer::{parse, symbol, token};
@@ -22,10 +22,7 @@ pub fn mixin_selector(input: &str) -> IResult<&str, Vec<SimpleSelector>> {
 }
 
 pub fn mixin_simple_selector(input: &str) -> IResult<&str, SimpleSelector> {
-    alt((
-        id_selector,
-        class_selector,
-    ))(input)
+    alt((id_selector, class_selector))(input)
 }
 
 /// Consume a LESS mixin combinator (e.g. ``, ` `, ` > `)

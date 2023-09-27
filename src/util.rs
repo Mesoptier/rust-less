@@ -6,7 +6,8 @@ use nom::IResult;
 ///
 /// Result is `Ok((I, ())` if predicate returns true, `Err(...)` otherwise.
 pub fn peek_pred<'i, F>(f: F) -> impl Fn(&'i str) -> IResult<&'i str, ()>
-    where F: Fn(&'i str) -> bool
+where
+    F: Fn(&'i str) -> bool,
 {
     move |input: &'i str| {
         if f(input) {

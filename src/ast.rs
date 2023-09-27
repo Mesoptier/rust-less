@@ -26,20 +26,15 @@ pub enum Item<'i> {
         value: Value<'i>,
     },
     /// A LESS variable call (e.g. `@ruleset();`)
-    VariableCall {
-        name: Cow<'i, str>,
-    },
+    VariableCall { name: Cow<'i, str> },
     /// A LESS mixin declaration (e.g. `.mixin(@arg) { ... }`)
     MixinDeclaration {
         selector: SimpleSelector<'i>,
         block: Vec<Item<'i>>,
     },
     /// A LESS mixin call (e.g. `.mixin(@arg: 'blue');`)
-    MixinCall {
-        selector: Vec<SimpleSelector<'i>>,
-    },
+    MixinCall { selector: Vec<SimpleSelector<'i>> },
 }
-
 
 //
 // Values
@@ -109,7 +104,6 @@ pub enum Operation {
     Multiply,
     Divide,
 }
-
 
 //
 // Selectors

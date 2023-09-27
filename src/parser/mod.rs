@@ -1,8 +1,8 @@
 use nom::branch::alt;
 use nom::combinator::{cut, map, opt};
-use nom::IResult;
 use nom::multi::many0;
 use nom::sequence::delimited;
+use nom::IResult;
 
 use crate::ast::*;
 use crate::lexer::{at_keyword, ident, parse, symbol, token};
@@ -13,10 +13,10 @@ use crate::parser::value::{declaration_value, variable_declaration_value};
 #[cfg(test)]
 mod tests;
 
-mod value;
-mod string;
-mod selector;
 mod mixin;
+mod selector;
+mod string;
+mod value;
 
 fn parse_stylesheet(input: &str) -> IResult<&str, Stylesheet> {
     parse(stylesheet)(input)
@@ -28,11 +28,7 @@ fn stylesheet(input: &str) -> IResult<&str, Stylesheet> {
 }
 
 fn block_of_items(input: &str) -> IResult<&str, Vec<Item>> {
-    delimited(
-        symbol("{"),
-        cut(list_of_items),
-        symbol("}"),
-    )(input)
+    delimited(symbol("{"), cut(list_of_items), symbol("}"))(input)
 }
 
 fn list_of_items(input: &str) -> IResult<&str, Vec<Item>> {
@@ -49,7 +45,7 @@ fn item(input: &str) -> IResult<&str, Item> {
         qualified_rule,
         variable_declaration,
         variable_call,
-//        at_rule,
+        //        at_rule,
     ))(input)
 }
 
@@ -61,7 +57,14 @@ fn declaration(input: &str) -> IResult<&str, Item> {
     let (input, value) = declaration_value(input)?;
     let (input, important) = important(input)?;
     let (input, _) = symbol(";")(input)?;
-    Ok((input, Item::Declaration { name, value, important }))
+    Ok((
+        input,
+        Item::Declaration {
+            name,
+            value,
+            important,
+        },
+    ))
 }
 
 /// Parse an !important token
@@ -74,7 +77,13 @@ fn qualified_rule(input: &str) -> IResult<&str, Item> {
 
     let (input, selector_group) = selector_group(input)?;
     let (input, block) = block_of_items(input)?;
-    Ok((input, Item::QualifiedRule { selector_group, block }))
+    Ok((
+        input,
+        Item::QualifiedRule {
+            selector_group,
+            block,
+        },
+    ))
 }
 
 //fn at_rule(input: &str) -> IResult<&str, Item> {

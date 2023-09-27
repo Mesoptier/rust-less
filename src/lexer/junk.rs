@@ -2,8 +2,8 @@ use nom::branch::alt;
 use nom::bytes::complete::{tag, take_until, take_while};
 use nom::character::complete::multispace1;
 use nom::combinator::{cut, value};
-use nom::IResult;
 use nom::multi::{many0, many1};
+use nom::IResult;
 
 fn whitespace(input: &str) -> IResult<&str, ()> {
     let (input, _) = multispace1(input)?;
@@ -37,9 +37,9 @@ pub fn junk1(input: &str) -> IResult<&str, ()> {
 
 #[cfg(test)]
 mod tests {
-    use nom::Err::Failure;
     use nom::error::ErrorKind::TakeUntil;
     use nom::error::ParseError;
+    use nom::Err::Failure;
 
     use super::*;
 
@@ -74,7 +74,10 @@ mod tests {
         let cases = vec![
             ("/**/", Ok(("", ()))),
             ("/* multiline \n comment */", Ok(("", ()))),
-            ("/* eof", Err(Failure(ParseError::from_error_kind(" eof", TakeUntil)))),
+            (
+                "/* eof",
+                Err(Failure(ParseError::from_error_kind(" eof", TakeUntil))),
+            ),
         ];
 
         for (input, expected) in cases {

@@ -41,7 +41,7 @@ pub fn would_start_identifier(s: &str) -> bool {
         Some('-') => match chars.next() {
             Some(c) if is_name_start(c) => true,
             Some('-') => true,
-            _ => is_valid_escape(&s[1..])
+            _ => is_valid_escape(&s[1..]),
         },
         Some(c) if is_name_start(c) => true,
         Some('\\') => is_valid_escape(s),

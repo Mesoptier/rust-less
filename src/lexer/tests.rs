@@ -1,6 +1,6 @@
 use nom::bytes::complete::tag;
-use nom::Err::Error;
 use nom::error::{ErrorKind, ParseError};
+use nom::Err::Error;
 
 use crate::lexer::{at_keyword, ident, number, numeric, symbol, token};
 

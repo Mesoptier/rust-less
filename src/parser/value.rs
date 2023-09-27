@@ -1,10 +1,10 @@
-use nom::{IResult, Parser};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::combinator::{cut, map, value};
 use nom::error::Error;
 use nom::multi::{fold_many0, many1, separated_list1};
 use nom::sequence::{pair, preceded, terminated};
+use nom::{IResult, Parser};
 
 use crate::ast::{Lookup, Operation, Value};
 use crate::lexer::{at_keyword, ident, numeric, symbol, token};
@@ -22,8 +22,8 @@ pub fn declaration_value(input: &str) -> IResult<&str, Value> {
 }
 
 pub fn semicolon_list<'i, F>(f: F) -> impl FnMut(&'i str) -> IResult<&'i str, Value<'i>>
-    where
-        F: Parser<&'i str, Value<'i>, Error<&'i str>>,
+where
+    F: Parser<&'i str, Value<'i>, Error<&'i str>>,
 {
     map(separated_list1(symbol(";"), f), |values| {
         Value::SemicolonList(values)
@@ -31,8 +31,8 @@ pub fn semicolon_list<'i, F>(f: F) -> impl FnMut(&'i str) -> IResult<&'i str, Va
 }
 
 pub fn comma_list<'i, F>(f: F) -> impl FnMut(&'i str) -> IResult<&'i str, Value<'i>>
-    where
-        F: Parser<&'i str, Value<'i>, Error<&'i str>>,
+where
+    F: Parser<&'i str, Value<'i>, Error<&'i str>>,
 {
     map(separated_list1(symbol(","), f), |values| {
         Value::CommaList(values)
@@ -40,8 +40,8 @@ pub fn comma_list<'i, F>(f: F) -> impl FnMut(&'i str) -> IResult<&'i str, Value<
 }
 
 pub fn space_list<'i, F>(f: F) -> impl FnMut(&'i str) -> IResult<&'i str, Value<'i>>
-    where
-        F: Parser<&'i str, Value<'i>, Error<&'i str>>,
+where
+    F: Parser<&'i str, Value<'i>, Error<&'i str>>,
 {
     map(many1(f), |values| Value::SpaceList(values))
 }
@@ -50,9 +50,9 @@ fn operation_expression<'i, F, G>(
     mut operand: F,
     operator: G,
 ) -> impl FnOnce(&'i str) -> IResult<&'i str, Value<'i>>
-    where
-        F: Parser<&'i str, Value<'i>, Error<&'i str>>,
-        G: Parser<&'i str, Operation, Error<&'i str>>,
+where
+    F: Parser<&'i str, Value<'i>, Error<&'i str>>,
+    G: Parser<&'i str, Operation, Error<&'i str>>,
 {
     move |input: &'i str| {
         let (input, first) = operand.parse(input)?;
@@ -185,7 +185,7 @@ mod tests {
                             Value::SpaceList(vec![Value::Numeric(0_f32, None)]),
                             Value::SpaceList(vec![Value::Numeric(255_f32, None)]),
                         ])])
-                            .into(),
+                        .into(),
                     ),
                 )),
             ),
@@ -205,7 +205,7 @@ mod tests {
                                 Value::Numeric(30_f32, Some("%".into())),
                             ]),
                         ])])
-                            .into(),
+                        .into(),
                     ),
                 )),
             ),
