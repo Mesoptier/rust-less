@@ -1,7 +1,7 @@
 use nom::branch::alt;
-use nom::combinator::{cut, map, opt};
+use nom::combinator::{cut, map, opt, value};
 use nom::multi::many0;
-use nom::sequence::delimited;
+use nom::sequence::{delimited, preceded};
 use nom::IResult;
 
 use crate::ast::*;
@@ -25,6 +25,17 @@ fn parse_stylesheet(input: &str) -> IResult<&str, Stylesheet> {
 fn stylesheet(input: &str) -> IResult<&str, Stylesheet> {
     let (input, items) = list_of_items(input)?;
     Ok((input, Stylesheet { items }))
+}
+
+fn guarded_block(input: &str) -> IResult<&str, GuardedBlock> {
+    let (input, guard) = opt(delimited(
+        preceded(symbol("when"), symbol("(")),
+        // TODO: Parse actual boolean expression
+        value(Guard, symbol("true")),
+        symbol(")"),
+    ))(input)?;
+    let (input, items) = block_of_items(input)?;
+    Ok((input, GuardedBlock { guard, items }))
 }
 
 fn block_of_items(input: &str) -> IResult<&str, Vec<Item>> {
@@ -76,7 +87,7 @@ fn qualified_rule(input: &str) -> IResult<&str, Item> {
     // TODO: Parse guard
 
     let (input, selector_group) = selector_group(input)?;
-    let (input, block) = block_of_items(input)?;
+    let (input, block) = guarded_block(input)?;
     Ok((
         input,
         Item::QualifiedRule {
@@ -96,8 +107,15 @@ fn mixin_declaration(input: &str) -> IResult<&str, Item> {
 
     let (input, selector) = token(mixin_simple_selector)(input)?;
     let (input, _) = symbol("()")(input)?;
-    let (input, block) = block_of_items(input)?;
-    Ok((input, Item::MixinDeclaration { selector, block }))
+    let (input, block) = guarded_block(input)?;
+    Ok((
+        input,
+        Item::MixinDeclaration {
+            selector,
+            arguments: vec![],
+            block,
+        },
+    ))
 }
 
 fn mixin_call(input: &str) -> IResult<&str, Item> {

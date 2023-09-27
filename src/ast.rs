@@ -6,13 +6,22 @@ pub struct Stylesheet<'i> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct GuardedBlock<'i> {
+    pub guard: Option<Guard>,
+    pub items: Vec<Item<'i>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Guard;
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Item<'i> {
     /// A CSS at-rule (e.g. `@media ... { ... }`)
     AtRule,
     /// A CSS qualified rule (e.g. `body > a { ... }`)
     QualifiedRule {
         selector_group: SelectorGroup<'i>,
-        block: Vec<Item<'i>>,
+        block: GuardedBlock<'i>,
     },
     /// A CSS property declaration (e.g. `color: blue;`)
     Declaration {
@@ -30,7 +39,8 @@ pub enum Item<'i> {
     /// A LESS mixin declaration (e.g. `.mixin(@arg) { ... }`)
     MixinDeclaration {
         selector: SimpleSelector<'i>,
-        block: Vec<Item<'i>>,
+        arguments: Vec<()>,
+        block: GuardedBlock<'i>,
     },
     /// A LESS mixin call (e.g. `.mixin(@arg: 'blue');`)
     MixinCall { selector: Vec<SimpleSelector<'i>> },

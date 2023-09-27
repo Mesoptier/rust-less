@@ -38,7 +38,11 @@ fn test_mixin_declaration() {
             "",
             Item::MixinDeclaration {
                 selector: SimpleSelector::Id("lib".into()),
-                block: vec![],
+                arguments: vec![],
+                block: GuardedBlock {
+                    guard: None,
+                    items: vec![]
+                },
             },
         ))
     );
@@ -48,7 +52,25 @@ fn test_mixin_declaration() {
             "",
             Item::MixinDeclaration {
                 selector: SimpleSelector::Class("test".into()),
-                block: vec![],
+                arguments: vec![],
+                block: GuardedBlock {
+                    guard: None,
+                    items: vec![]
+                },
+            },
+        ))
+    );
+    assert_eq!(
+        mixin_declaration(".guarded() when (true) { }"),
+        Ok((
+            "",
+            Item::MixinDeclaration {
+                selector: SimpleSelector::Class("guarded".into()),
+                arguments: vec![],
+                block: GuardedBlock {
+                    guard: Some(Guard),
+                    items: vec![]
+                },
             },
         ))
     );
@@ -67,13 +89,16 @@ fn test_qualified_rule() {
                     )])],
                     vec![]
                 )]),
-                block: vec![Item::Declaration {
-                    name: "color".into(),
-                    value: Value::CommaList(vec![Value::SpaceList(vec![Value::Ident(
-                        "blue".into()
-                    )])]),
-                    important: false,
-                }]
+                block: GuardedBlock {
+                    guard: None,
+                    items: vec![Item::Declaration {
+                        name: "color".into(),
+                        value: Value::CommaList(vec![Value::SpaceList(vec![Value::Ident(
+                            "blue".into()
+                        )])]),
+                        important: false,
+                    }]
+                }
             }
         ))
     )
