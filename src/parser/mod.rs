@@ -84,8 +84,6 @@ fn important(input: &str) -> IResult<&str, bool> {
 }
 
 fn qualified_rule(input: &str) -> IResult<&str, Item> {
-    // TODO: Parse guard
-
     let (input, selector_group) = selector_group(input)?;
     let (input, block) = guarded_block(input)?;
     Ok((
@@ -103,7 +101,6 @@ fn qualified_rule(input: &str) -> IResult<&str, Item> {
 
 fn mixin_declaration(input: &str) -> IResult<&str, Item> {
     // TODO: Parse arguments
-    // TODO: Parse guard
 
     let (input, selector) = token(mixin_simple_selector)(input)?;
     let (input, _) = symbol("()")(input)?;
