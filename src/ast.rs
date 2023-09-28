@@ -89,6 +89,22 @@ pub enum Value<'i> {
     InterpolatedString(Vec<Cow<'i, str>>, Vec<InterpolatedValue<'i>>),
 }
 
+impl<'i> Value<'i> {
+    /// Attempt to reduce the value to a single non-list value.
+    pub fn single(&self) -> Option<Self> {
+        match self {
+            Value::SemicolonList(values) | Value::CommaList(values) | Value::SpaceList(values) => {
+                if values.len() == 1 {
+                    values[0].single()
+                } else {
+                    None
+                }
+            }
+            _ => Some(self.clone())
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Lookup<'i> {
     /// Lookup last declaration (e.g. `@config[]`)
