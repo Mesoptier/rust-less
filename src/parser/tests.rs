@@ -80,6 +80,23 @@ fn test_mixin_declaration() {
             },
         ))
     );
+    assert_eq!(
+        mixin_declaration(".test(@color: blue) { }"),
+        Ok((
+            "",
+            Item::MixinDeclaration {
+                selector: SimpleSelector::Class("test".into()),
+                arguments: vec![MixinDeclarationArgument::Variable {
+                    name: "color".into(),
+                    default: Some(Value::SpaceList(vec![Value::Ident("blue".into())]))
+                }],
+                block: GuardedBlock {
+                    guard: None,
+                    items: vec![]
+                },
+            },
+        ))
+    );
 }
 
 #[test]

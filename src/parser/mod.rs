@@ -6,7 +6,7 @@ use nom::IResult;
 
 use crate::ast::*;
 use crate::lexer::{at_keyword, ident, parse, symbol, token};
-use crate::parser::mixin::{mixin_selector, mixin_simple_selector};
+use crate::parser::mixin::{mixin_declaration_arguments, mixin_selector, mixin_simple_selector};
 use crate::parser::selector::selector_group;
 use crate::parser::value::{declaration_value, variable_declaration_value};
 
@@ -103,13 +103,14 @@ fn mixin_declaration(input: &str) -> IResult<&str, Item> {
     // TODO: Parse arguments
 
     let (input, selector) = token(mixin_simple_selector)(input)?;
-    let (input, _) = symbol("()")(input)?;
+    let (input, arguments) =
+        delimited(symbol("("), mixin_declaration_arguments, symbol(")"))(input)?;
     let (input, block) = guarded_block(input)?;
     Ok((
         input,
         Item::MixinDeclaration {
             selector,
-            arguments: vec![],
+            arguments,
             block,
         },
     ))

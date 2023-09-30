@@ -21,6 +21,13 @@ pub fn declaration_value(input: &str) -> IResult<&str, Value> {
     comma_list(space_list(sum_expression))(input)
 }
 
+pub fn comma_separated_arg_value(input: &str) -> IResult<&str, Value> {
+    space_list(sum_expression)(input)
+}
+pub fn semicolon_separated_arg_value(input: &str) -> IResult<&str, Value> {
+    comma_list(space_list(sum_expression))(input)
+}
+
 pub fn semicolon_list<'i, F>(f: F) -> impl FnMut(&'i str) -> IResult<&'i str, Value<'i>>
 where
     F: Parser<&'i str, Value<'i>, Error<&'i str>>,

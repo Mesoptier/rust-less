@@ -39,11 +39,25 @@ pub enum Item<'i> {
     /// A LESS mixin declaration (e.g. `.mixin(@arg) { ... }`)
     MixinDeclaration {
         selector: SimpleSelector<'i>,
-        arguments: Vec<()>,
+        arguments: Vec<MixinDeclarationArgument<'i>>,
         block: GuardedBlock<'i>,
     },
     /// A LESS mixin call (e.g. `.mixin(@arg: 'blue');`)
     MixinCall { selector: Vec<SimpleSelector<'i>> },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum MixinDeclarationArgument<'i> {
+    Variable {
+        name: Cow<'i, str>,
+        default: Option<Value<'i>>,
+    },
+    Literal {
+        value: Value<'i>,
+    },
+    Variadic {
+        name: Option<Cow<'i, str>>,
+    },
 }
 
 //
@@ -100,7 +114,7 @@ impl<'i> Value<'i> {
                     None
                 }
             }
-            _ => Some(self.clone())
+            _ => Some(self.clone()),
         }
     }
 }

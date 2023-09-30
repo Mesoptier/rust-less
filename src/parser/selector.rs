@@ -1,13 +1,13 @@
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{cut, fail, into, success, value};
-use nom::IResult;
 use nom::multi::{fold_many0, separated_list1};
 use nom::sequence::{pair, preceded, terminated};
+use nom::IResult;
 
 use crate::ast::{Combinator, Selector, SelectorGroup, SimpleSelector, SimpleSelectorSequence};
-use crate::lexer::{ident, name, parse, symbol, token};
 use crate::lexer::junk::junk1;
+use crate::lexer::{ident, name, parse, symbol, token};
 
 pub fn selector_group(input: &str) -> IResult<&str, SelectorGroup> {
     into(separated_list1(symbol(","), selector))(input)
@@ -122,11 +122,11 @@ fn negation_selector(input: &str) -> IResult<&str, SimpleSelector> {
 
 #[cfg(test)]
 mod tests {
-    use nom::Err::Failure;
     use nom::error::{ErrorKind, ParseError};
+    use nom::Err::Failure;
 
-    use crate::ast::{Combinator, Selector, SelectorGroup, SimpleSelectorSequence};
     use crate::ast::SimpleSelector::*;
+    use crate::ast::{Combinator, Selector, SelectorGroup, SimpleSelectorSequence};
     use crate::parser::selector::selector_group;
 
     use super::simple_selector_sequence;
