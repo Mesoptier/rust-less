@@ -3,7 +3,7 @@ use nom::bytes::complete::tag;
 use nom::combinator::{cut, map, value};
 use nom::error::Error;
 use nom::multi::{fold_many0, many1, separated_list1};
-use nom::sequence::{pair, preceded, terminated};
+use nom::sequence::{delimited, pair, preceded, terminated};
 use nom::{IResult, Parser};
 
 use crate::ast::{BinaryOperator, Expression, Lookup};
@@ -26,6 +26,17 @@ pub fn comma_separated_arg_value(input: &str) -> IResult<&str, Expression> {
 }
 pub fn semicolon_separated_arg_value(input: &str) -> IResult<&str, Expression> {
     comma_list(space_list(sum_operation))(input)
+}
+
+pub fn boolean_expression(input: &str) -> IResult<&str, Expression> {
+    logical_operation(input)
+}
+
+fn sub<'i, F>(f: F) -> impl FnMut(&'i str) -> IResult<&str, Expression>
+where
+    F: Parser<&'i str, Expression<'i>, Error<&'i str>>,
+{
+    delimited(symbol("("), f, symbol(")"))
 }
 
 fn semicolon_list<'i, F>(f: F) -> impl FnMut(&'i str) -> IResult<&'i str, Expression<'i>>
@@ -71,6 +82,29 @@ where
     }
 }
 
+fn logical_operation(input: &str) -> IResult<&str, Expression> {
+    binary_operation(
+        comparison_operation,
+        alt((
+            value(BinaryOperator::And, symbol("and")),
+            value(BinaryOperator::Or, symbol("or")),
+        )),
+    )(input)
+}
+
+fn comparison_operation(input: &str) -> IResult<&str, Expression> {
+    binary_operation(
+        sum_operation,
+        alt((
+            value(BinaryOperator::Equality, symbol("=")),
+            value(BinaryOperator::LessThan, symbol("<")),
+            value(BinaryOperator::LessThanOrEqualTo, symbol("<=")),
+            value(BinaryOperator::GreaterThan, symbol(">")),
+            value(BinaryOperator::GreaterThanOrEqualTo, symbol(">=")),
+        )),
+    )(input)
+}
+
 fn sum_operation(input: &str) -> IResult<&str, Expression> {
     binary_operation(
         product_operation,
@@ -104,6 +138,9 @@ fn simple_expression(input: &str) -> IResult<&str, Expression> {
         function_call,
         // mixin_call, // includes mixin_lookup?
         ident_value,
+
+        // TODO: logical_operation is only valid in a boolean expression? For other expressions it should be sum_operation?
+        sub(logical_operation),
     ))(input)
 }
 
@@ -177,10 +214,65 @@ fn ident_value(input: &str) -> IResult<&str, Expression> {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::{Expression, Lookup};
+    use crate::ast::{BinaryOperator, Expression, Lookup};
     use crate::parser::expression::{
-        function_call, lookup, property, variable, variable_or_lookup,
+        boolean_expression, function_call, lookup, property, variable, variable_or_lookup,
     };
+
+    #[test]
+    fn test_boolean_expression() {
+        assert_eq!(
+            boolean_expression("true"),
+            Ok(("", Expression::Ident("true".into())))
+        );
+        assert_eq!(
+            boolean_expression("@is-blue"),
+            Ok(("", Expression::Variable("is-blue".into())))
+        );
+        assert_eq!(
+            boolean_expression("@color = blue"),
+            Ok((
+                "",
+                Expression::BinaryOperation(
+                    BinaryOperator::Equality,
+                    Expression::Variable("color".into()).into(),
+                    Expression::Ident("blue".into()).into(),
+                )
+            ))
+        );
+        assert_eq!(
+            boolean_expression("@color = blue and @has-border"),
+            Ok((
+                "",
+                Expression::BinaryOperation(
+                    BinaryOperator::And,
+                    Expression::BinaryOperation(
+                        BinaryOperator::Equality,
+                        Expression::Variable("color".into()).into(),
+                        Expression::Ident("blue".into()).into(),
+                    )
+                        .into(),
+                    Expression::Variable("has-border".into()).into(),
+                )
+            ))
+        );
+        assert_eq!(
+            boolean_expression("(@color = blue) and @has-border"),
+            Ok((
+                "",
+                Expression::BinaryOperation(
+                    BinaryOperator::And,
+                    Expression::BinaryOperation(
+                        BinaryOperator::Equality,
+                        Expression::Variable("color".into()).into(),
+                        Expression::Ident("blue".into()).into(),
+                    )
+                    .into(),
+                    Expression::Variable("has-border".into()).into(),
+                )
+            ))
+        );
+    }
 
     #[test]
     fn test_function_call() {
