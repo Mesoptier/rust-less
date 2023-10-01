@@ -6,17 +6,17 @@ use nom::IResult;
 
 use crate::ast::*;
 use crate::lexer::{at_keyword, ident, parse, symbol, token};
+use crate::parser::expression::{declaration_value, variable_declaration_value};
 use crate::parser::mixin::{mixin_declaration_arguments, mixin_selector, mixin_simple_selector};
 use crate::parser::selector::selector_group;
-use crate::parser::value::{declaration_value, variable_declaration_value};
 
 #[cfg(test)]
 mod tests;
 
+mod expression;
 mod mixin;
 mod selector;
 mod string;
-mod value;
 
 fn parse_stylesheet(input: &str) -> IResult<&str, Stylesheet> {
     parse(stylesheet)(input)
@@ -31,7 +31,7 @@ fn guarded_block(input: &str) -> IResult<&str, GuardedBlock> {
     let (input, guard) = opt(delimited(
         preceded(symbol("when"), symbol("(")),
         // TODO: Parse actual boolean expression
-        value(Guard, symbol("true")),
+        value(Expression::Ident("true".into()), symbol("true")),
         symbol(")"),
     ))(input)?;
     let (input, items) = block_of_items(input)?;

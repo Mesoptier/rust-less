@@ -5,10 +5,10 @@ use nom::multi::fold_many0;
 use nom::sequence::preceded;
 use nom::IResult;
 
-use crate::ast::{MixinDeclarationArgument, SimpleSelector, Value};
+use crate::ast::{Expression, MixinDeclarationArgument, SimpleSelector};
 use crate::lexer::{ident, parse, symbol, token};
+use crate::parser::expression::{comma_separated_arg_value, semicolon_separated_arg_value};
 use crate::parser::selector::{class_selector, id_selector};
-use crate::parser::value::{comma_separated_arg_value, semicolon_separated_arg_value};
 
 pub fn mixin_selector(input: &str) -> IResult<&str, Vec<SimpleSelector>> {
     let (input, first) = token(mixin_simple_selector)(input)?;
@@ -128,7 +128,7 @@ pub fn mixin_declaration_arguments(
                     }
                 }
 
-                let value = Value::CommaList(values);
+                let value = Expression::CommaList(values);
                 let arg = match name {
                     Some(name) => MixinDeclarationArgument::Variable {
                         name,
@@ -152,7 +152,7 @@ pub fn mixin_declaration_arguments(
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::{MixinDeclarationArgument, Value};
+    use crate::ast::{Expression, MixinDeclarationArgument};
     use crate::parser::mixin::mixin_declaration_arguments;
 
     #[test]
@@ -174,7 +174,9 @@ mod tests {
                 "",
                 vec![MixinDeclarationArgument::Variable {
                     name: "color".into(),
-                    default: Some(Value::SpaceList(vec![Value::Ident("blue".into())])),
+                    default: Some(Expression::SpaceList(vec![Expression::Ident(
+                        "blue".into()
+                    )])),
                 }]
             ))
         );
@@ -183,7 +185,7 @@ mod tests {
             Ok((
                 "",
                 vec![MixinDeclarationArgument::Literal {
-                    value: Value::SpaceList(vec![Value::Ident("blue".into())])
+                    value: Expression::SpaceList(vec![Expression::Ident("blue".into())])
                 }]
             ))
         );
@@ -225,14 +227,14 @@ mod tests {
                 vec![
                     MixinDeclarationArgument::Variable {
                         name: "width".into(),
-                        default: Some(Value::SpaceList(vec![Value::Numeric(
+                        default: Some(Expression::SpaceList(vec![Expression::Numeric(
                             50.0,
                             Some("px".into())
                         )])),
                     },
                     MixinDeclarationArgument::Variable {
                         name: "height".into(),
-                        default: Some(Value::SpaceList(vec![Value::Variable(
+                        default: Some(Expression::SpaceList(vec![Expression::Variable(
                             "global-height".into()
                         )])),
                     },
@@ -249,13 +251,13 @@ mod tests {
                 vec![
                     MixinDeclarationArgument::Variable {
                         name: "colors".into(),
-                        default: Some(Value::SpaceList(vec![Value::Ident("red".into())])),
+                        default: Some(Expression::SpaceList(vec![Expression::Ident("red".into())])),
                     },
                     MixinDeclarationArgument::Literal {
-                        value: Value::SpaceList(vec![Value::Ident("green".into())]),
+                        value: Expression::SpaceList(vec![Expression::Ident("green".into())]),
                     },
                     MixinDeclarationArgument::Literal {
-                        value: Value::SpaceList(vec![Value::Ident("blue".into())]),
+                        value: Expression::SpaceList(vec![Expression::Ident("blue".into())]),
                     }
                 ]
             ))
@@ -268,10 +270,10 @@ mod tests {
                 "",
                 vec![MixinDeclarationArgument::Variable {
                     name: "colors".into(),
-                    default: Some(Value::CommaList(vec![
-                        Value::SpaceList(vec![Value::Ident("red".into())]),
-                        Value::SpaceList(vec![Value::Ident("green".into())]),
-                        Value::SpaceList(vec![Value::Ident("blue".into())]),
+                    default: Some(Expression::CommaList(vec![
+                        Expression::SpaceList(vec![Expression::Ident("red".into())]),
+                        Expression::SpaceList(vec![Expression::Ident("green".into())]),
+                        Expression::SpaceList(vec![Expression::Ident("blue".into())]),
                     ])),
                 },]
             ))

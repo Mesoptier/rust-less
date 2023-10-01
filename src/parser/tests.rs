@@ -1,4 +1,4 @@
-use crate::parser::value::declaration_value;
+use crate::parser::expression::declaration_value;
 
 use super::*;
 
@@ -74,7 +74,7 @@ fn test_mixin_declaration() {
                 selector: SimpleSelector::Class("guarded".into()),
                 arguments: vec![],
                 block: GuardedBlock {
-                    guard: Some(Guard),
+                    guard: Some(Expression::Ident("true".into())),
                     items: vec![]
                 },
             },
@@ -88,7 +88,9 @@ fn test_mixin_declaration() {
                 selector: SimpleSelector::Class("test".into()),
                 arguments: vec![MixinDeclarationArgument::Variable {
                     name: "color".into(),
-                    default: Some(Value::SpaceList(vec![Value::Ident("blue".into())]))
+                    default: Some(Expression::SpaceList(vec![Expression::Ident(
+                        "blue".into()
+                    )]))
                 }],
                 block: GuardedBlock {
                     guard: None,
@@ -111,9 +113,9 @@ fn test_qualified_rule() {
                     guard: None,
                     items: vec![Item::Declaration {
                         name: "color".into(),
-                        value: Value::CommaList(vec![Value::SpaceList(vec![Value::Ident(
-                            "blue".into()
-                        )])]),
+                        value: Expression::CommaList(vec![Expression::SpaceList(vec![
+                            Expression::Ident("blue".into())
+                        ])]),
                         important: false,
                     }]
                 }
@@ -128,7 +130,7 @@ fn test_qualified_rule() {
             Item::QualifiedRule {
                 selector_group: selector_group!("a"),
                 block: GuardedBlock {
-                    guard: Some(Guard),
+                    guard: Some(Expression::Ident("true".into())),
                     items: vec![]
                 }
             }
@@ -144,7 +146,9 @@ fn test_declaration() {
             "",
             Item::Declaration {
                 name: "color".into(),
-                value: Value::CommaList(vec![Value::SpaceList(vec![Value::Ident("blue".into())])]),
+                value: Expression::CommaList(vec![Expression::SpaceList(vec![Expression::Ident(
+                    "blue".into()
+                )])]),
                 important: false,
             }
         ))
@@ -157,38 +161,42 @@ fn test_declaration_value() {
         declaration_value("0 * 0 + 0 / 0"),
         Ok((
             "",
-            Value::CommaList(vec![Value::SpaceList(vec![Value::Operation(
-                Operation::Add,
-                Value::Operation(
-                    Operation::Multiply,
-                    Value::Numeric(0.0, None).into(),
-                    Value::Numeric(0.0, None).into(),
+            Expression::CommaList(vec![Expression::SpaceList(vec![
+                Expression::BinaryOperation(
+                    BinaryOperator::Add,
+                    Expression::BinaryOperation(
+                        BinaryOperator::Multiply,
+                        Expression::Numeric(0.0, None).into(),
+                        Expression::Numeric(0.0, None).into(),
+                    )
+                    .into(),
+                    Expression::BinaryOperation(
+                        BinaryOperator::Divide,
+                        Expression::Numeric(0.0, None).into(),
+                        Expression::Numeric(0.0, None).into(),
+                    )
+                    .into(),
                 )
-                .into(),
-                Value::Operation(
-                    Operation::Divide,
-                    Value::Numeric(0.0, None).into(),
-                    Value::Numeric(0.0, None).into(),
-                )
-                .into(),
-            )])])
+            ])])
         ))
     );
     assert_eq!(
         declaration_value("blue"),
         Ok((
             "",
-            Value::CommaList(vec![Value::SpaceList(vec![Value::Ident("blue".into())])])
+            Expression::CommaList(vec![Expression::SpaceList(vec![Expression::Ident(
+                "blue".into()
+            )])])
         ))
     );
     assert_eq!(
         declaration_value("5px solid red"),
         Ok((
             "",
-            Value::CommaList(vec![Value::SpaceList(vec![
-                Value::Numeric(5.0, Some("px".into())),
-                Value::Ident("solid".into()),
-                Value::Ident("red".into()),
+            Expression::CommaList(vec![Expression::SpaceList(vec![
+                Expression::Numeric(5.0, Some("px".into())),
+                Expression::Ident("solid".into()),
+                Expression::Ident("red".into()),
             ])])
         ))
     );
@@ -196,7 +204,7 @@ fn test_declaration_value() {
         declaration_value("@primary"),
         Ok((
             "",
-            Value::CommaList(vec![Value::SpaceList(vec![Value::Variable(
+            Expression::CommaList(vec![Expression::SpaceList(vec![Expression::Variable(
                 "primary".into()
             )])])
         ))
@@ -205,17 +213,16 @@ fn test_declaration_value() {
         declaration_value("@colors[primary]"),
         Ok((
             "",
-            Value::CommaList(vec![Value::SpaceList(vec![Value::VariableLookup(
-                "colors".into(),
-                vec![Lookup::Ident("primary".into())]
-            )])])
+            Expression::CommaList(vec![Expression::SpaceList(vec![
+                Expression::VariableLookup("colors".into(), vec![Lookup::Ident("primary".into())])
+            ])])
         ))
     );
     assert_eq!(
         declaration_value("$color"),
         Ok((
             "",
-            Value::CommaList(vec![Value::SpaceList(vec![Value::Property(
+            Expression::CommaList(vec![Expression::SpaceList(vec![Expression::Property(
                 "color".into()
             )])])
         ))
@@ -224,13 +231,13 @@ fn test_declaration_value() {
         declaration_value("rgba(0, 0, 0, 0.5)"),
         Ok((
             "",
-            Value::CommaList(vec![Value::SpaceList(vec![Value::FunctionCall(
+            Expression::CommaList(vec![Expression::SpaceList(vec![Expression::FunctionCall(
                 "rgba".into(),
-                Value::SemicolonList(vec![Value::CommaList(vec![
-                    Value::SpaceList(vec![Value::Numeric(0.0, None)]),
-                    Value::SpaceList(vec![Value::Numeric(0.0, None)]),
-                    Value::SpaceList(vec![Value::Numeric(0.0, None)]),
-                    Value::SpaceList(vec![Value::Numeric(0.5, None)]),
+                Expression::SemicolonList(vec![Expression::CommaList(vec![
+                    Expression::SpaceList(vec![Expression::Numeric(0.0, None)]),
+                    Expression::SpaceList(vec![Expression::Numeric(0.0, None)]),
+                    Expression::SpaceList(vec![Expression::Numeric(0.0, None)]),
+                    Expression::SpaceList(vec![Expression::Numeric(0.5, None)]),
                 ])])
                 .into()
             )])])
@@ -240,7 +247,7 @@ fn test_declaration_value() {
         declaration_value("\"test\""),
         Ok((
             "",
-            Value::CommaList(vec![Value::SpaceList(vec![Value::QuotedString(
+            Expression::CommaList(vec![Expression::SpaceList(vec![Expression::QuotedString(
                 "test".into()
             )])])
         ))
@@ -249,20 +256,24 @@ fn test_declaration_value() {
         declaration_value("\"color is @{color}\""),
         Ok((
             "",
-            Value::CommaList(vec![Value::SpaceList(vec![Value::InterpolatedString(
-                vec!["color is ".into(), "".into()],
-                vec![InterpolatedValue::Variable("color".into())]
-            )])])
+            Expression::CommaList(vec![Expression::SpaceList(vec![
+                Expression::InterpolatedString(
+                    vec!["color is ".into(), "".into()],
+                    vec![InterpolatedValue::Variable("color".into())]
+                )
+            ])])
         ))
     );
     assert_eq!(
         declaration_value("\"color is ${color}\""),
         Ok((
             "",
-            Value::CommaList(vec![Value::SpaceList(vec![Value::InterpolatedString(
-                vec!["color is ".into(), "".into()],
-                vec![InterpolatedValue::Property("color".into())]
-            )])])
+            Expression::CommaList(vec![Expression::SpaceList(vec![
+                Expression::InterpolatedString(
+                    vec!["color is ".into(), "".into()],
+                    vec![InterpolatedValue::Property("color".into())]
+                )
+            ])])
         ))
     );
 }

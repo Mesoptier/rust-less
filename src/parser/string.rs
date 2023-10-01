@@ -9,11 +9,11 @@ use nom::multi::{fold_many1, many_till};
 use nom::sequence::{delimited, pair};
 use nom::IResult;
 
-use crate::ast::{InterpolatedValue, Value};
+use crate::ast::{Expression, InterpolatedValue};
 use crate::lexer::ident;
 
 /// Parse a quoted or interpolated string, starting and ending with the given `quote`.
-pub fn string(quote: char) -> impl Fn(&str) -> IResult<&str, Value> {
+pub fn string(quote: char) -> impl Fn(&str) -> IResult<&str, Expression> {
     move |input: &str| {
         // Start quote
         let (input, _) = char(quote)(input)?;
@@ -22,7 +22,7 @@ pub fn string(quote: char) -> impl Fn(&str) -> IResult<&str, Value> {
 
         // If the next char is an end-quote, this is a simple quoted string
         if let Ok((input, _)) = char::<_, (&str, ErrorKind)>(quote)(input) {
-            return Ok((input, Value::QuotedString(first_part)));
+            return Ok((input, Expression::QuotedString(first_part)));
         }
 
         // Otherwise try parsing an interpolated string
@@ -71,7 +71,7 @@ fn interpolated_part(input: &str) -> IResult<&str, InterpolatedValue> {
 fn interpolated_string_tail<'i>(
     quote: char,
     first_part: Cow<'i, str>,
-) -> impl FnOnce(&'i str) -> IResult<&'i str, Value<'i>> {
+) -> impl FnOnce(&'i str) -> IResult<&'i str, Expression<'i>> {
     move |input: &'i str| {
         let (input, (strings, values)) = fold_many1(
             pair(interpolated_part, string_part(quote)),
@@ -85,13 +85,13 @@ fn interpolated_string_tail<'i>(
 
         let (input, _) = char(quote)(input)?;
 
-        Ok((input, Value::InterpolatedString(strings, values)))
+        Ok((input, Expression::InterpolatedString(strings, values)))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::{InterpolatedValue, Value};
+    use crate::ast::{Expression, InterpolatedValue};
 
     use super::string;
 
@@ -99,13 +99,13 @@ mod tests {
     fn test_string() {
         let cases = vec![
             // Quoted strings
-            ("'test'", Ok(("", Value::QuotedString("test".into())))),
+            ("'test'", Ok(("", Expression::QuotedString("test".into())))),
             // Interpolated strings
             (
                 "'a @{b}'",
                 Ok((
                     "",
-                    Value::InterpolatedString(
+                    Expression::InterpolatedString(
                         vec!["a ".into(), "".into()],
                         vec![InterpolatedValue::Variable("b".into())],
                     ),
@@ -115,7 +115,7 @@ mod tests {
                 "'${a} b'",
                 Ok((
                     "",
-                    Value::InterpolatedString(
+                    Expression::InterpolatedString(
                         vec!["".into(), " b".into()],
                         vec![InterpolatedValue::Property("a".into())],
                     ),

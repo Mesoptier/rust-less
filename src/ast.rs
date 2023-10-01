@@ -7,12 +7,9 @@ pub struct Stylesheet<'i> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct GuardedBlock<'i> {
-    pub guard: Option<Guard>,
+    pub guard: Option<Expression<'i>>,
     pub items: Vec<Item<'i>>,
 }
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Guard;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Item<'i> {
@@ -26,13 +23,13 @@ pub enum Item<'i> {
     /// A CSS property declaration (e.g. `color: blue;`)
     Declaration {
         name: Cow<'i, str>,
-        value: Value<'i>,
+        value: Expression<'i>,
         important: bool,
     },
     /// A LESS variable declaration (e.g. `@color: blue;`)
     VariableDeclaration {
         name: Cow<'i, str>,
-        value: Value<'i>,
+        value: Expression<'i>,
     },
     /// A LESS variable call (e.g. `@ruleset();`)
     VariableCall { name: Cow<'i, str> },
@@ -50,10 +47,10 @@ pub enum Item<'i> {
 pub enum MixinDeclarationArgument<'i> {
     Variable {
         name: Cow<'i, str>,
-        default: Option<Value<'i>>,
+        default: Option<Expression<'i>>,
     },
     Literal {
-        value: Value<'i>,
+        value: Expression<'i>,
     },
     Variadic {
         name: Option<Cow<'i, str>>,
@@ -71,19 +68,21 @@ pub enum InterpolatedValue<'i> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Value<'i> {
+pub enum Expression<'i> {
     /// A semicolon-separated list of values
-    SemicolonList(Vec<Value<'i>>),
+    SemicolonList(Vec<Expression<'i>>),
     /// A comma-separated list of values
-    CommaList(Vec<Value<'i>>),
+    CommaList(Vec<Expression<'i>>),
     /// A space-separated list of values
-    SpaceList(Vec<Value<'i>>),
+    SpaceList(Vec<Expression<'i>>),
 
     /// A detached ruleset (e.g. `{ color: blue; }`)
     DetachedRuleset(Vec<Item<'i>>),
 
+    /// A unary operation (e.g. `-@spacing`)
+    UnaryOperation(UnaryOperator, Box<Expression<'i>>),
     /// A binary operation (e.g. `2px + @spacing`)
-    Operation(Operation, Box<Value<'i>>, Box<Value<'i>>),
+    BinaryOperation(BinaryOperator, Box<Expression<'i>>, Box<Expression<'i>>),
 
     /// A variable reference (e.g. `@primary`)
     Variable(Cow<'i, str>),
@@ -96,18 +95,20 @@ pub enum Value<'i> {
     /// A number (e.g. `20`, `20.5e-2`, `20%`, `20px`)
     Numeric(f32, Option<Cow<'i, str>>),
     /// A function call (e.g. `rgba(0, 0, 0, 0.5)`)
-    FunctionCall(Cow<'i, str>, Box<Value<'i>>),
+    FunctionCall(Cow<'i, str>, Box<Expression<'i>>),
     /// A quoted string (e.g. `"test"`)
     QuotedString(Cow<'i, str>),
     /// An interpolated string (e.g. `"color is @{color}"`, `"color is ${color}"`)
     InterpolatedString(Vec<Cow<'i, str>>, Vec<InterpolatedValue<'i>>),
 }
 
-impl<'i> Value<'i> {
+impl<'i> Expression<'i> {
     /// Attempt to reduce the value to a single non-list value.
     pub fn single(&self) -> Option<Self> {
         match self {
-            Value::SemicolonList(values) | Value::CommaList(values) | Value::SpaceList(values) => {
+            Expression::SemicolonList(values)
+            | Expression::CommaList(values)
+            | Expression::SpaceList(values) => {
                 if values.len() == 1 {
                     values[0].single()
                 } else {
@@ -138,11 +139,24 @@ pub enum Lookup<'i> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Operation {
+pub enum BinaryOperator {
     Add,
     Subtract,
     Multiply,
     Divide,
+    And,
+    Or,
+    Equality,
+    LessThan,
+    LessThanOrEqualTo,
+    GreaterThanOrEqualTo,
+    GreaterThan,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum UnaryOperator {
+    Not,
+    Negate,
 }
 
 //
