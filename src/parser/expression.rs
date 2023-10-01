@@ -28,7 +28,7 @@ pub fn semicolon_separated_arg_value(input: &str) -> IResult<&str, Expression> {
     comma_list(space_list(sum_operation))(input)
 }
 
-pub fn semicolon_list<'i, F>(f: F) -> impl FnMut(&'i str) -> IResult<&'i str, Expression<'i>>
+fn semicolon_list<'i, F>(f: F) -> impl FnMut(&'i str) -> IResult<&'i str, Expression<'i>>
 where
     F: Parser<&'i str, Expression<'i>, Error<&'i str>>,
 {
@@ -37,7 +37,7 @@ where
     })
 }
 
-pub fn comma_list<'i, F>(f: F) -> impl FnMut(&'i str) -> IResult<&'i str, Expression<'i>>
+fn comma_list<'i, F>(f: F) -> impl FnMut(&'i str) -> IResult<&'i str, Expression<'i>>
 where
     F: Parser<&'i str, Expression<'i>, Error<&'i str>>,
 {
@@ -46,7 +46,7 @@ where
     })
 }
 
-pub fn space_list<'i, F>(f: F) -> impl FnMut(&'i str) -> IResult<&'i str, Expression<'i>>
+fn space_list<'i, F>(f: F) -> impl FnMut(&'i str) -> IResult<&'i str, Expression<'i>>
 where
     F: Parser<&'i str, Expression<'i>, Error<&'i str>>,
 {
