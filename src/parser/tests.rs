@@ -21,7 +21,7 @@ fn test_stylesheet() {
   }
 }
 
-.box when (#lib.colors[@primary] = blue) {
+.box when (@test[@primary] = blue) {
   width: 100px;
   height: ($width / 2);
 }

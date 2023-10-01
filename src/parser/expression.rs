@@ -138,7 +138,6 @@ fn simple_expression(input: &str) -> IResult<&str, Expression> {
         function_call,
         // mixin_call, // includes mixin_lookup?
         ident_value,
-
         // TODO: logical_operation is only valid in a boolean expression? For other expressions it should be sum_operation?
         sub(logical_operation),
     ))(input)
@@ -251,7 +250,7 @@ mod tests {
                         Expression::Variable("color".into()).into(),
                         Expression::Ident("blue".into()).into(),
                     )
-                        .into(),
+                    .into(),
                     Expression::Variable("has-border".into()).into(),
                 )
             ))
@@ -270,6 +269,18 @@ mod tests {
                     .into(),
                     Expression::Variable("has-border".into()).into(),
                 )
+            ))
+        );
+        assert_eq!(
+            boolean_expression("#lib.colors[@primary] = blue"),
+            Ok((
+                "",
+                Expression::BinaryOperation(
+                    BinaryOperator::Equality,
+                    Expression::Variable("color".into()).into(),
+                    Expression::Ident("blue".into()).into(),
+                )
+                .into(),
             ))
         );
     }
