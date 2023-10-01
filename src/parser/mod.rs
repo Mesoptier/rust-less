@@ -1,13 +1,13 @@
 use nom::branch::alt;
 use nom::combinator::{cut, map, opt, value};
+use nom::IResult;
 use nom::multi::many0;
 use nom::sequence::{delimited, preceded};
-use nom::IResult;
 
 use crate::ast::*;
 use crate::lexer::{at_keyword, ident, parse, symbol, token};
 use crate::parser::expression::{declaration_value, variable_declaration_value};
-use crate::parser::mixin::{mixin_declaration_arguments, mixin_selector, mixin_simple_selector};
+use crate::parser::mixin::{mixin_call, mixin_declaration};
 use crate::parser::selector::selector_group;
 
 #[cfg(test)]
@@ -98,33 +98,6 @@ fn qualified_rule(input: &str) -> IResult<&str, Item> {
 //fn at_rule(input: &str) -> IResult<&str, Item> {
 //    let (input, name) = at_keyword(input)?;
 //}
-
-fn mixin_declaration(input: &str) -> IResult<&str, Item> {
-    // TODO: Parse arguments
-
-    let (input, selector) = token(mixin_simple_selector)(input)?;
-    let (input, arguments) =
-        delimited(symbol("("), mixin_declaration_arguments, symbol(")"))(input)?;
-    let (input, block) = guarded_block(input)?;
-    Ok((
-        input,
-        Item::MixinDeclaration {
-            selector,
-            arguments,
-            block,
-        },
-    ))
-}
-
-fn mixin_call(input: &str) -> IResult<&str, Item> {
-    // TODO: Parse arguments
-    // TODO: Parse lookups
-
-    let (input, selector) = mixin_selector(input)?;
-    let (input, _) = symbol("()")(input)?;
-    let (input, _) = symbol(";")(input)?;
-    Ok((input, Item::MixinCall { selector }))
-}
 
 fn variable_declaration(input: &str) -> IResult<&str, Item> {
     let (input, name) = at_keyword(input)?;

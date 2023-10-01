@@ -1,16 +1,42 @@
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::combinator::{cond, fail, opt, value};
-use nom::multi::fold_many0;
-use nom::sequence::preceded;
 use nom::IResult;
+use nom::multi::fold_many0;
+use nom::sequence::{delimited, preceded};
 
-use crate::ast::{Expression, MixinDeclarationArgument, SimpleSelector};
+use crate::ast::{Expression, Item, MixinDeclarationArgument, SimpleSelector};
 use crate::lexer::{ident, parse, symbol, token};
+use crate::parser;
 use crate::parser::expression::{comma_separated_arg_value, semicolon_separated_arg_value};
 use crate::parser::selector::{class_selector, id_selector};
 
-pub fn mixin_selector(input: &str) -> IResult<&str, Vec<SimpleSelector>> {
+pub fn mixin_declaration(input: &str) -> IResult<&str, Item> {
+    let (input, selector) = token(mixin_simple_selector)(input)?;
+    let (input, arguments) =
+        delimited(symbol("("), mixin_declaration_arguments, symbol(")"))(input)?;
+    let (input, block) = parser::guarded_block(input)?;
+    Ok((
+        input,
+        Item::MixinDeclaration {
+            selector,
+            arguments,
+            block,
+        },
+    ))
+}
+
+pub fn mixin_call(input: &str) -> IResult<&str, Item> {
+    // TODO: Parse arguments
+    // TODO: Parse lookups
+
+    let (input, selector) = mixin_selector(input)?;
+    let (input, _) = symbol("()")(input)?;
+    let (input, _) = symbol(";")(input)?;
+    Ok((input, Item::MixinCall { selector }))
+}
+
+fn mixin_selector(input: &str) -> IResult<&str, Vec<SimpleSelector>> {
     let (input, first) = token(mixin_simple_selector)(input)?;
 
     token(fold_many0(
@@ -23,7 +49,7 @@ pub fn mixin_selector(input: &str) -> IResult<&str, Vec<SimpleSelector>> {
     ))(input)
 }
 
-pub fn mixin_simple_selector(input: &str) -> IResult<&str, SimpleSelector> {
+fn mixin_simple_selector(input: &str) -> IResult<&str, SimpleSelector> {
     alt((id_selector, class_selector))(input)
 }
 
@@ -32,7 +58,7 @@ fn mixin_combinator(input: &str) -> IResult<&str, ()> {
     value((), parse(opt(symbol(">"))))(input)
 }
 
-pub fn mixin_declaration_arguments(
+fn mixin_declaration_arguments(
     mut input: &str,
 ) -> IResult<&str, Vec<MixinDeclarationArgument>> {
     let mut args = vec![];
@@ -152,8 +178,8 @@ pub fn mixin_declaration_arguments(
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::{Expression, MixinDeclarationArgument};
-    use crate::parser::mixin::mixin_declaration_arguments;
+    use crate::ast::{Expression, GuardedBlock, Item, MixinDeclarationArgument, SimpleSelector};
+    use crate::parser::mixin::{mixin_declaration, mixin_declaration_arguments};
 
     #[test]
     fn test_mixin_declaration_arguments() {
@@ -276,6 +302,72 @@ mod tests {
                         Expression::SpaceList(vec![Expression::Ident("blue".into())]),
                     ])),
                 },]
+            ))
+        );
+    }
+
+
+    #[test]
+    fn test_mixin_declaration() {
+        assert_eq!(
+            mixin_declaration("#lib() { }"),
+            Ok((
+                "",
+                Item::MixinDeclaration {
+                    selector: SimpleSelector::Id("lib".into()),
+                    arguments: vec![],
+                    block: GuardedBlock {
+                        guard: None,
+                        items: vec![]
+                    },
+                },
+            ))
+        );
+        assert_eq!(
+            mixin_declaration(".test () { }"),
+            Ok((
+                "",
+                Item::MixinDeclaration {
+                    selector: SimpleSelector::Class("test".into()),
+                    arguments: vec![],
+                    block: GuardedBlock {
+                        guard: None,
+                        items: vec![]
+                    },
+                },
+            ))
+        );
+        assert_eq!(
+            mixin_declaration(".guarded() when (true) { }"),
+            Ok((
+                "",
+                Item::MixinDeclaration {
+                    selector: SimpleSelector::Class("guarded".into()),
+                    arguments: vec![],
+                    block: GuardedBlock {
+                        guard: Some(Expression::Ident("true".into())),
+                        items: vec![]
+                    },
+                },
+            ))
+        );
+        assert_eq!(
+            mixin_declaration(".test(@color: blue) { }"),
+            Ok((
+                "",
+                Item::MixinDeclaration {
+                    selector: SimpleSelector::Class("test".into()),
+                    arguments: vec![MixinDeclarationArgument::Variable {
+                        name: "color".into(),
+                        default: Some(Expression::SpaceList(vec![Expression::Ident(
+                            "blue".into()
+                        )]))
+                    }],
+                    block: GuardedBlock {
+                        guard: None,
+                        items: vec![]
+                    },
+                },
             ))
         );
     }
