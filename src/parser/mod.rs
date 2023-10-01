@@ -1,8 +1,8 @@
 use nom::branch::alt;
 use nom::combinator::{cut, map, opt, value};
-use nom::IResult;
 use nom::multi::many0;
 use nom::sequence::{delimited, preceded};
+use nom::IResult;
 
 use crate::ast::*;
 use crate::lexer::{at_keyword, ident, parse, symbol, token};

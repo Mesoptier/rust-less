@@ -1,9 +1,9 @@
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::combinator::{cond, fail, opt, value};
-use nom::IResult;
 use nom::multi::fold_many0;
 use nom::sequence::{delimited, preceded};
+use nom::IResult;
 
 use crate::ast::{Expression, Item, MixinDeclarationArgument, SimpleSelector};
 use crate::lexer::{ident, parse, symbol, token};
@@ -58,9 +58,7 @@ fn mixin_combinator(input: &str) -> IResult<&str, ()> {
     value((), parse(opt(symbol(">"))))(input)
 }
 
-fn mixin_declaration_arguments(
-    mut input: &str,
-) -> IResult<&str, Vec<MixinDeclarationArgument>> {
+fn mixin_declaration_arguments(mut input: &str) -> IResult<&str, Vec<MixinDeclarationArgument>> {
     let mut args = vec![];
 
     let mut is_semicolon_separated = false;
@@ -305,7 +303,6 @@ mod tests {
             ))
         );
     }
-
 
     #[test]
     fn test_mixin_declaration() {
