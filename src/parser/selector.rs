@@ -3,17 +3,17 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{cut, fail, into, success, value};
 use nom::multi::{fold_many0, separated_list1};
 use nom::sequence::{pair, preceded, terminated};
-use nom::IResult;
 
 use crate::ast::{Combinator, Selector, SelectorGroup, SimpleSelector, SimpleSelectorSequence};
 use crate::lexer::junk::junk1;
 use crate::lexer::{ident, name, parse, symbol, token};
+use crate::ParseResult;
 
-pub fn selector_group(input: &str) -> IResult<&str, SelectorGroup> {
+pub fn selector_group(input: &str) -> ParseResult<SelectorGroup> {
     into(separated_list1(symbol(","), selector))(input)
 }
 
-pub fn selector(input: &str) -> IResult<&str, Selector> {
+pub fn selector(input: &str) -> ParseResult<Selector> {
     let (input, first) = simple_selector_sequence(input)?;
     token(into(fold_many0(
         pair(combinator, simple_selector_sequence),
@@ -27,7 +27,7 @@ pub fn selector(input: &str) -> IResult<&str, Selector> {
 }
 
 /// Consume a combinator (e.g. `>`, `+`, `~`, ` `)
-pub fn combinator(input: &str) -> IResult<&str, Combinator> {
+pub fn combinator(input: &str) -> ParseResult<Combinator> {
     alt((
         value(Combinator::Child, parse(symbol(">"))),
         value(Combinator::NextSibling, parse(symbol("+"))),
@@ -36,7 +36,7 @@ pub fn combinator(input: &str) -> IResult<&str, Combinator> {
     ))(input)
 }
 
-pub fn simple_selector_sequence(input: &str) -> IResult<&str, SimpleSelectorSequence> {
+pub fn simple_selector_sequence(input: &str) -> ParseResult<SimpleSelectorSequence> {
     // TODO: Parse LESS parent selector
 
     // Type/Universal selector can only be the first selector
@@ -66,7 +66,7 @@ pub fn simple_selector_sequence(input: &str) -> IResult<&str, SimpleSelectorSequ
     ))(input)
 }
 
-fn type_selector(input: &str) -> IResult<&str, SimpleSelector> {
+fn type_selector(input: &str) -> ParseResult<SimpleSelector> {
     let (input, name) = ident(input)?;
 
     // "when" keyword starts a guard, so should not be parsed as a type selector
@@ -77,32 +77,32 @@ fn type_selector(input: &str) -> IResult<&str, SimpleSelector> {
     }
 }
 
-fn universal_selector(input: &str) -> IResult<&str, SimpleSelector> {
+fn universal_selector(input: &str) -> ParseResult<SimpleSelector> {
     let (input, _) = tag("*")(input)?;
     Ok((input, SimpleSelector::Universal))
 }
 
-pub fn id_selector(input: &str) -> IResult<&str, SimpleSelector> {
+pub fn id_selector(input: &str) -> ParseResult<SimpleSelector> {
     let (input, name) = preceded(tag("#"), name)(input)?;
     Ok((input, SimpleSelector::Id(name)))
 }
 
-pub fn class_selector(input: &str) -> IResult<&str, SimpleSelector> {
+pub fn class_selector(input: &str) -> ParseResult<SimpleSelector> {
     let (input, name) = preceded(tag("."), ident)(input)?;
     Ok((input, SimpleSelector::Class(name)))
 }
 
-fn pseudo_class_selector(input: &str) -> IResult<&str, SimpleSelector> {
+fn pseudo_class_selector(input: &str) -> ParseResult<SimpleSelector> {
     let (input, name) = preceded(tag(":"), ident)(input)?;
     Ok((input, SimpleSelector::PseudoClass(name)))
 }
 
-fn pseudo_element_selector(input: &str) -> IResult<&str, SimpleSelector> {
+fn pseudo_element_selector(input: &str) -> ParseResult<SimpleSelector> {
     let (input, name) = preceded(tag("::"), ident)(input)?;
     Ok((input, SimpleSelector::PseudoElement(name)))
 }
 
-fn negation_selector(input: &str) -> IResult<&str, SimpleSelector> {
+fn negation_selector(input: &str) -> ParseResult<SimpleSelector> {
     let (input, arg) = preceded(
         token(tag_no_case(":not(")),
         cut(terminated(

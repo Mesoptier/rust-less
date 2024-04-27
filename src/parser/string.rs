@@ -7,13 +7,13 @@ use nom::combinator::{map, peek, recognize};
 use nom::error::ErrorKind;
 use nom::multi::{fold_many1, many_till};
 use nom::sequence::{delimited, pair};
-use nom::IResult;
 
 use crate::ast::{Expression, InterpolatedValue};
 use crate::lexer::ident;
+use crate::ParseResult;
 
 /// Parse a quoted or interpolated string, starting and ending with the given `quote`.
-pub fn string(quote: char) -> impl Fn(&str) -> IResult<&str, Expression> {
+pub fn string(quote: char) -> impl Fn(&str) -> ParseResult<Expression> {
     move |input: &str| {
         // Start quote
         let (input, _) = char(quote)(input)?;
@@ -33,7 +33,7 @@ pub fn string(quote: char) -> impl Fn(&str) -> IResult<&str, Expression> {
 /// Parse the literal part of a string.
 ///
 /// Returns when the next chars would end the string or open an interpolation part.
-fn string_part(quote: char) -> impl Fn(&str) -> IResult<&str, Cow<str>> {
+fn string_part(quote: char) -> impl Fn(&str) -> ParseResult<Cow<str>> {
     move |input: &str| {
         map(
             recognize(many_till(
@@ -52,7 +52,7 @@ fn string_part(quote: char) -> impl Fn(&str) -> IResult<&str, Cow<str>> {
 }
 
 /// Parse an interpolated variable/property in a string.
-fn interpolated_part(input: &str) -> IResult<&str, InterpolatedValue> {
+fn interpolated_part(input: &str) -> ParseResult<InterpolatedValue> {
     alt((
         delimited(
             tag("@{"),
@@ -71,7 +71,7 @@ fn interpolated_part(input: &str) -> IResult<&str, InterpolatedValue> {
 fn interpolated_string_tail<'i>(
     quote: char,
     first_part: Cow<'i, str>,
-) -> impl FnOnce(&'i str) -> IResult<&'i str, Expression<'i>> {
+) -> impl FnOnce(&'i str) -> ParseResult<Expression> {
     move |input: &'i str| {
         let (input, (strings, values)) = fold_many1(
             pair(interpolated_part, string_part(quote)),

@@ -3,15 +3,14 @@ use nom::bytes::complete::tag;
 use nom::combinator::{cond, fail, opt, value};
 use nom::multi::fold_many0;
 use nom::sequence::{delimited, preceded};
-use nom::IResult;
 
+use crate::{parser, ParseResult};
 use crate::ast::{Expression, Item, MixinDeclarationArgument, SimpleSelector};
 use crate::lexer::{ident, parse, symbol, token};
-use crate::parser;
 use crate::parser::expression::{comma_separated_arg_value, semicolon_separated_arg_value};
 use crate::parser::selector::{class_selector, id_selector};
 
-pub fn mixin_declaration(input: &str) -> IResult<&str, Item> {
+pub fn mixin_declaration(input: &str) -> ParseResult<Item> {
     let (input, selector) = token(mixin_simple_selector)(input)?;
     let (input, arguments) =
         delimited(symbol("("), mixin_declaration_arguments, symbol(")"))(input)?;
@@ -26,7 +25,7 @@ pub fn mixin_declaration(input: &str) -> IResult<&str, Item> {
     ))
 }
 
-pub fn mixin_call(input: &str) -> IResult<&str, Item> {
+pub fn mixin_call(input: &str) -> ParseResult<Item> {
     // TODO: Parse arguments
     // TODO: Parse lookups
 
@@ -36,7 +35,7 @@ pub fn mixin_call(input: &str) -> IResult<&str, Item> {
     Ok((input, Item::MixinCall { selector }))
 }
 
-fn mixin_selector(input: &str) -> IResult<&str, Vec<SimpleSelector>> {
+fn mixin_selector(input: &str) -> ParseResult<Vec<SimpleSelector>> {
     let (input, first) = token(mixin_simple_selector)(input)?;
 
     token(fold_many0(
@@ -49,16 +48,16 @@ fn mixin_selector(input: &str) -> IResult<&str, Vec<SimpleSelector>> {
     ))(input)
 }
 
-fn mixin_simple_selector(input: &str) -> IResult<&str, SimpleSelector> {
+fn mixin_simple_selector(input: &str) -> ParseResult<SimpleSelector> {
     alt((id_selector, class_selector))(input)
 }
 
 /// Consume a LESS mixin combinator (e.g. ``, ` `, ` > `)
-fn mixin_combinator(input: &str) -> IResult<&str, ()> {
+fn mixin_combinator(input: &str) -> ParseResult<()> {
     value((), parse(opt(symbol(">"))))(input)
 }
 
-fn mixin_declaration_arguments(mut input: &str) -> IResult<&str, Vec<MixinDeclarationArgument>> {
+fn mixin_declaration_arguments(mut input: &str) -> ParseResult<Vec<MixinDeclarationArgument>> {
     let mut args = vec![];
 
     let mut is_semicolon_separated = false;
