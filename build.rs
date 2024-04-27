@@ -4,9 +4,11 @@ fn main() {
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let out_dir = std::path::Path::new(&out_dir);
 
+    let cwd_dir = std::path::Path::new(".");
+
     // Generate test cases for the integration tests from the Less.js test data
-    let test_data_dir = std::path::Path::new("./node_modules/@less/test-data");
-    let main_dir = test_data_dir.join("less/_main");
+    let test_data_dir = cwd_dir.join("node_modules").join("@less").join("test-data");
+    let main_dir = test_data_dir.join("less").join("_main");
 
     let destination = out_dir.join("integration_tests_generated.rs");
     let mut file = std::fs::File::create(&destination).unwrap();
@@ -29,8 +31,7 @@ fn main() {
                     test_file({:?});
                 }}
             ",
-            test_name,
-            path
+            test_name, path
         )
         .unwrap();
     }

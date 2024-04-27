@@ -1,21 +1,24 @@
 extern crate less;
 
 use std::process::Command;
-use assert_json_diff::assert_json_include;
+
+use assert_json_diff::assert_json_matches;
 
 include!(concat!(env!("OUT_DIR"), "/integration_tests_generated.rs"));
 
 fn test_file(path: &str) {
-    let source = std::fs::read_to_string(path).unwrap();
+    println!("Testing LESS file\n    at {}:1", path);
 
-    let stylesheet = less::parse(&source).unwrap();
+    let source = std::fs::read_to_string(path).unwrap();
 
     let expected = less_js_parse(path);
 
-    assert_json_include!(
-        actual: stylesheet.to_less_js_ast(),
-        expected: expected,
-    );
+    let actual = less::parse(&source).unwrap().to_less_js_ast();
+
+    let config = assert_json_diff::Config::new(assert_json_diff::CompareMode::Inclusive)
+        .numeric_mode(assert_json_diff::NumericMode::AssumeFloat);
+
+    assert_json_matches!(expected, actual, config);
 }
 
 fn less_js_parse(filename: &str) -> serde_json::Value {
@@ -31,36 +34,7 @@ fn less_js_parse(filename: &str) -> serde_json::Value {
 
     let output = String::from_utf8(output.stdout).unwrap();
 
-    let mut json_value: serde_json::Value = serde_json::from_str(&output).unwrap();
-
-    // Replace integer values with floating point values
-    visit_mut(&mut json_value, &mut |value| {
-        if let serde_json::Value::Number(number) = value {
-            if !number.is_f64() {
-                *value = serde_json::Value::Number(serde_json::Number::from_f64(number.as_f64().unwrap()).unwrap());
-            }
-        }
-    });
-
-    json_value
-}
-
-fn visit_mut(value: &mut serde_json::Value, f: &mut impl FnMut(&mut serde_json::Value)) {
-    f(value);
-
-    match value {
-        serde_json::Value::Object(map) => {
-            for (_, value) in map {
-                visit_mut(value, f);
-            }
-        },
-        serde_json::Value::Array(vec) => {
-            for value in vec {
-                visit_mut(value, f);
-            }
-        },
-        _ => {},
-    }
+    serde_json::from_str(&output).unwrap()
 }
 
 trait ToLessJsAst {
@@ -90,15 +64,26 @@ impl ToLessJsAst for less::ast::Item<'_> {
 
         match self {
             Item::AtRule => todo!(),
-            Item::QualifiedRule { selector_group, block } => {
-                let rules = block.items.iter().map(|item| item.to_less_js_ast()).collect::<Vec<_>>();
+            Item::QualifiedRule {
+                selector_group,
+                block,
+            } => {
+                let rules = block
+                    .items
+                    .iter()
+                    .map(|item| item.to_less_js_ast())
+                    .collect::<Vec<_>>();
                 serde_json::json!({
                     "type": "Ruleset",
                     "selectors": selector_group.to_less_js_ast(),
                     "rules": rules,
                 })
-            },
-            Item::Declaration { name, value, important } => {
+            }
+            Item::Declaration {
+                name,
+                value,
+                important,
+            } => {
                 serde_json::json!({
                     "type": "Declaration",
                     "name": [
@@ -120,7 +105,7 @@ impl ToLessJsAst for less::ast::Item<'_> {
                     "merge": false,
                     "variable": true,
                 })
-            },
+            }
             Item::VariableCall { .. } => todo!(),
             Item::MixinDeclaration { .. } => todo!(),
             Item::MixinCall { .. } => todo!(),
@@ -143,7 +128,7 @@ impl ToLessJsAst for less::ast::Expression<'_> {
                     "type": "Value",
                     "value": value,
                 })
-            },
+            }
             Expression::SpaceList(exprs) => {
                 let mut value = vec![];
                 for expr in exprs {
@@ -153,7 +138,7 @@ impl ToLessJsAst for less::ast::Expression<'_> {
                     "type": "Expression",
                     "value": value,
                 })
-            },
+            }
             Expression::DetachedRuleset(_) => todo!(),
             Expression::UnaryOperation(_, _) => todo!(),
             Expression::BinaryOperation(_, _, _) => todo!(),
@@ -162,7 +147,7 @@ impl ToLessJsAst for less::ast::Expression<'_> {
                     "type": "Variable",
                     "name": format!("@{}", name),
                 })
-            },
+            }
             Expression::VariableLookup(_, _) => todo!(),
             Expression::Property(_) => todo!(),
             Expression::Ident(_) => todo!(),
@@ -181,7 +166,7 @@ impl ToLessJsAst for less::ast::Expression<'_> {
                     "value": value,
                     "unit": unit,
                 })
-            },
+            }
             Expression::FunctionCall(_, _) => todo!(),
             Expression::QuotedString(_) => todo!(),
             Expression::InterpolatedString(_, _) => todo!(),
@@ -213,7 +198,7 @@ impl ToLessJsAst for less::ast::Selector<'_> {
                     less::ast::SimpleSelector::Class(class) => format!(".{}", class),
                     less::ast::SimpleSelector::Attribute(name) => {
                         format!("[{}]", name)
-                    },
+                    }
                     less::ast::SimpleSelector::PseudoElement(pe) => format!("::{}", pe),
                     less::ast::SimpleSelector::PseudoClass(pc) => format!(":{}", pc),
                     less::ast::SimpleSelector::Negation(_) => todo!(),
@@ -262,7 +247,7 @@ impl ToLessJsAst for less::ast::SimpleSelectorSequence<'_> {
                 less::ast::SimpleSelector::Class(class) => format!(".{}", class),
                 less::ast::SimpleSelector::Attribute(name) => {
                     format!("[{}]", name)
-                },
+                }
                 less::ast::SimpleSelector::PseudoElement(pe) => format!("::{}", pe),
                 less::ast::SimpleSelector::PseudoClass(pc) => format!(":{}", pc),
                 less::ast::SimpleSelector::Negation(_) => todo!(),
