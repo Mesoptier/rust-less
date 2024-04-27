@@ -66,8 +66,7 @@ fn item(input: &str) -> ParseResult<Item> {
 fn declaration(input: &str) -> ParseResult<Item> {
     // TODO: Parse LESS property merge syntax
 
-    let (input, name) = token(ident)(input)?;
-    let (input, _) = symbol(":")(input)?;
+    let (input, name) = terminated(token(ident), symbol(":"))(input)?;
     // We're definitely in a declaration, so we can use cut to prevent backtracking
     let (input, (value, important, _)) =
         cut(tuple((declaration_value, important, symbol(";"))))(input)?;
@@ -104,10 +103,9 @@ fn qualified_rule(input: &str) -> ParseResult<Item> {
 //}
 
 fn variable_declaration(input: &str) -> ParseResult<Item> {
-    let (input, name) = at_keyword(input)?;
-    let (input, _) = symbol(":")(input)?;
-    let (input, value) = variable_declaration_value(input)?;
-    let (input, _) = symbol(";")(input)?;
+    let (input, name) = terminated(at_keyword, symbol(":"))(input)?;
+    // We're definitely in a declaration, so we can use cut to prevent backtracking
+    let (input, value) = cut(terminated(variable_declaration_value, symbol(";")))(input)?;
     Ok((input, Item::VariableDeclaration { name, value }))
 }
 
