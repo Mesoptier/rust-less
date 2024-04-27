@@ -3,14 +3,14 @@ extern crate less;
 use std::process::Command;
 use assert_json_diff::assert_json_include;
 
-#[test]
-fn test() {
-    let filename = "./node_modules/@less/test-data/less/_main/lazy-eval.less";
-    let source = std::fs::read_to_string(filename).unwrap();
+include!(concat!(env!("OUT_DIR"), "/integration_tests_generated.rs"));
+
+fn test_file(path: &str) {
+    let source = std::fs::read_to_string(path).unwrap();
 
     let stylesheet = less::parse(&source).unwrap();
 
-    let expected = less_js_parse(filename);
+    let expected = less_js_parse(path);
 
     assert_json_include!(
         actual: stylesheet.to_less_js_ast(),
