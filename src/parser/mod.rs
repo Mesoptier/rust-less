@@ -69,12 +69,9 @@ fn declaration(input: &str) -> ParseResult<Item> {
     let (input, name) = token(ident)(input)?;
     let (input, _) = symbol(":")(input)?;
     // We're definitely in a declaration, so we can use cut to prevent backtracking
-    let (input, (value, important, _)) = cut(tuple((
-        declaration_value,
-        important,
-        symbol(";"),
-    )))(input)?;
-    
+    let (input, (value, important, _)) =
+        cut(tuple((declaration_value, important, symbol(";"))))(input)?;
+
     Ok((
         input,
         Item::Declaration {

@@ -2,14 +2,14 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::combinator::{cut, map, value};
 use nom::multi::{fold_many0, many1, separated_list1};
-use nom::sequence::{delimited, pair, preceded, terminated};
 use nom::Parser;
+use nom::sequence::{delimited, pair, preceded, terminated};
 
+use crate::{ParseError, ParseResult};
 use crate::ast::{BinaryOperator, Expression, Lookup};
 use crate::lexer::{at_keyword, ident, numeric, symbol, token};
 use crate::parser::block_of_items;
 use crate::parser::string::string;
-use crate::{ParseError, ParseResult};
 
 /// Parse a variable declaration's value
 pub fn variable_declaration_value(input: &str) -> ParseResult<Expression> {

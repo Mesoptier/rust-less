@@ -5,8 +5,8 @@ use nom::multi::{fold_many0, separated_list1};
 use nom::sequence::{pair, preceded, terminated};
 
 use crate::ast::{Combinator, Selector, SelectorGroup, SimpleSelector, SimpleSelectorSequence};
-use crate::lexer::junk::junk1;
 use crate::lexer::{ident, name, parse, symbol, token};
+use crate::lexer::junk::junk1;
 use crate::ParseResult;
 
 pub fn selector_group(input: &str) -> ParseResult<SelectorGroup> {
@@ -122,11 +122,11 @@ fn negation_selector(input: &str) -> ParseResult<SimpleSelector> {
 
 #[cfg(test)]
 mod tests {
-    use nom::error::{ErrorKind, ParseError};
     use nom::Err::Failure;
+    use nom::error::{ErrorKind, ParseError};
 
-    use crate::ast::SimpleSelector::*;
     use crate::ast::{Combinator, Selector, SelectorGroup, SimpleSelectorSequence};
+    use crate::ast::SimpleSelector::*;
     use crate::parser::selector::selector_group;
 
     use super::simple_selector_sequence;

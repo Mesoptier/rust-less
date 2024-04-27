@@ -3,12 +3,12 @@ use std::borrow::Cow;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take_while1};
 use nom::combinator::{map, opt};
-use nom::sequence::{pair, preceded, terminated};
 use nom::Parser;
+use nom::sequence::{pair, preceded, terminated};
 
+use crate::{ParseError, ParseResult};
 use crate::lexer::helpers::{is_digit, is_name, would_start_identifier};
 use crate::util::peek_pred;
-use crate::{ParseError, ParseResult};
 
 mod helpers;
 pub mod junk;

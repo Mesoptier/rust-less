@@ -18,7 +18,7 @@ pub fn string(quote: char) -> impl Fn(&str) -> ParseResult<Expression> {
         let (input, escaped) = opt(char('~'))(input)?;
         let _escaped = escaped.is_some();
         // TODO: Handle escaped strings
-        
+
         // Start quote
         let (input, _) = char(quote)(input)?;
         // First string part

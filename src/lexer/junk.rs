@@ -38,8 +38,8 @@ pub fn junk1(input: &str) -> ParseResult<()> {
 #[cfg(test)]
 mod tests {
     use nom::error::ErrorKind::TakeUntil;
-    use nom::error::ParseResult;
     use nom::Err::Failure;
+    use nom::error::ParseError;
 
     use super::*;
 
@@ -76,7 +76,7 @@ mod tests {
             ("/* multiline \n comment */", Ok(("", ()))),
             (
                 "/* eof",
-                Err(Failure(ParseResult::from_error_kind(" eof", TakeUntil))),
+                Err(Failure(ParseError::from_error_kind(" eof", TakeUntil))),
             ),
         ];
 
