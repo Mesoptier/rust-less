@@ -4,12 +4,11 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::{anychar, char};
 use nom::combinator::{map, opt, peek, recognize};
-use nom::error::ErrorKind;
 use nom::multi::{fold_many1, many_till};
 use nom::sequence::{delimited, pair};
 
 use crate::ast::{Expression, InterpolatedValue};
-use crate::lexer::ident;
+use crate::lexer::{ident, token};
 use crate::ParseResult;
 
 /// Parse a quoted or interpolated string, starting and ending with the given `quote`.
@@ -25,7 +24,7 @@ pub fn string(quote: char) -> impl Fn(&str) -> ParseResult<Expression> {
         let (input, first_part) = string_part(quote)(input)?;
 
         // If the next char is an end-quote, this is a simple quoted string
-        if let Ok((input, _)) = char::<_, (&str, ErrorKind)>(quote)(input) {
+        if let Ok((input, _)) = token(char(quote))(input) {
             return Ok((input, Expression::QuotedString(first_part)));
         }
 
@@ -87,7 +86,7 @@ fn interpolated_string_tail<'i>(
             },
         )(input)?;
 
-        let (input, _) = char(quote)(input)?;
+        let (input, _) = token(char(quote))(input)?;
 
         Ok((input, Expression::InterpolatedString(strings, values)))
     }
@@ -95,7 +94,7 @@ fn interpolated_string_tail<'i>(
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::{Expression, InterpolatedValue};
+    use crate::ast::{BinaryOperator, Expression, InterpolatedValue};
 
     use super::string;
 
@@ -130,5 +129,22 @@ mod tests {
         for (input, expected) in cases {
             assert_eq!(string('\'')(input), expected);
         }
+    }
+
+    #[test]
+    fn test_string_in_sum() {
+        let input = "'a' + 'b'";
+        let expected = Ok((
+            "",
+            Expression::CommaList(vec![Expression::SpaceList(vec![
+                Expression::BinaryOperation(
+                    BinaryOperator::Add,
+                    Expression::QuotedString("a".into()).into(),
+                    Expression::QuotedString("b".into()).into(),
+                ),
+            ])]),
+        ));
+
+        assert_eq!(super::super::declaration_value(input), expected);
     }
 }
