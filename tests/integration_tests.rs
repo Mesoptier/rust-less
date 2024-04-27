@@ -180,6 +180,7 @@ impl ToLessJsAst for less::ast::Expression<'_> {
             Expression::FunctionCall(_, _) => todo!(),
             Expression::QuotedString(_) => todo!(),
             Expression::InterpolatedString(_, _) => todo!(),
+            Expression::MixinCall(_, _) => todo!(),
         }
     }
 }

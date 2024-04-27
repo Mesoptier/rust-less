@@ -8,7 +8,7 @@ use crate::lexer::{at_keyword, ident, parse, symbol, token};
 use crate::parser::expression::{
     boolean_expression, declaration_value, variable_declaration_value,
 };
-use crate::parser::mixin::{mixin_call, mixin_declaration};
+use crate::parser::mixin::{mixin_call_item, mixin_declaration};
 use crate::parser::selector::selector_group;
 use crate::ParseResult;
 
@@ -55,7 +55,7 @@ fn item(input: &str) -> ParseResult<Item> {
     alt((
         mixin_declaration,
         declaration,
-        mixin_call,
+        mixin_call_item,
         qualified_rule,
         variable_declaration,
         variable_call,

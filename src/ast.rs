@@ -40,7 +40,7 @@ pub enum Item<'i> {
         block: GuardedBlock<'i>,
     },
     /// A LESS mixin call (e.g. `.mixin(@arg: 'blue');`)
-    MixinCall { selector: Vec<SimpleSelector<'i>> },
+    MixinCall(MixinCall<'i>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -55,6 +55,12 @@ pub enum MixinDeclarationArgument<'i> {
     Variadic {
         name: Option<Cow<'i, str>>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MixinCall<'i> {
+    pub selector: Vec<SimpleSelector<'i>>,
+    pub arguments: Vec<Expression<'i>>,
 }
 
 //
@@ -86,6 +92,7 @@ pub enum Expression<'i> {
 
     /// A variable reference (e.g. `@primary`)
     Variable(Cow<'i, str>),
+    // TODO: Merge with Variable?
     /// A variable lookup (e.g. `@colors[primary]`)
     VariableLookup(Cow<'i, str>, Vec<Lookup<'i>>),
     /// A property reference (e.g. `$color`)
@@ -100,6 +107,8 @@ pub enum Expression<'i> {
     QuotedString(Cow<'i, str>),
     /// An interpolated string (e.g. `"color is @{color}"`, `"color is ${color}"`)
     InterpolatedString(Vec<Cow<'i, str>>, Vec<InterpolatedValue<'i>>),
+    /// A mixin call (e.g. `.mixin()`), with optional lookup (e.g. `.mixin()[property]`)
+    MixinCall(MixinCall<'i>, Vec<Lookup<'i>>),
 }
 
 impl<'i> Expression<'i> {
@@ -134,6 +143,7 @@ pub enum Lookup<'i> {
     VariableVariable(Cow<'i, str>),
     /// Lookup property declaration by variable (e.g. `@config[$@variable]`)
     VariableProperty(Cow<'i, str>),
+    // TODO: Is InterpolatedString even possible here?
     /// An interpolated string (e.g. `"color is @{color}"`, `"color is ${color}"`)
     InterpolatedString(Vec<Cow<'i, str>>, Vec<InterpolatedValue<'i>>),
 }

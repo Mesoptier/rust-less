@@ -4,11 +4,11 @@ use nom::combinator::{cond, fail, opt, value};
 use nom::multi::fold_many0;
 use nom::sequence::{delimited, preceded};
 
-use crate::{parser, ParseResult};
-use crate::ast::{Expression, Item, MixinDeclarationArgument, SimpleSelector};
+use crate::ast::{Expression, Item, MixinCall, MixinDeclarationArgument, SimpleSelector};
 use crate::lexer::{ident, parse, symbol, token};
 use crate::parser::expression::{comma_separated_arg_value, semicolon_separated_arg_value};
 use crate::parser::selector::{class_selector, id_selector};
+use crate::{parser, ParseResult};
 
 pub fn mixin_declaration(input: &str) -> ParseResult<Item> {
     let (input, selector) = token(mixin_simple_selector)(input)?;
@@ -25,14 +25,29 @@ pub fn mixin_declaration(input: &str) -> ParseResult<Item> {
     ))
 }
 
-pub fn mixin_call(input: &str) -> ParseResult<Item> {
+fn mixin_call(input: &str) -> ParseResult<MixinCall> {
     // TODO: Parse arguments
-    // TODO: Parse lookups
 
     let (input, selector) = mixin_selector(input)?;
     let (input, _) = symbol("()")(input)?;
+    Ok((
+        input,
+        MixinCall {
+            selector,
+            arguments: vec![],
+        },
+    ))
+}
+
+pub fn mixin_call_item(input: &str) -> ParseResult<Item> {
+    let (input, mixin_call) = mixin_call(input)?;
     let (input, _) = symbol(";")(input)?;
-    Ok((input, Item::MixinCall { selector }))
+    Ok((input, Item::MixinCall(mixin_call)))
+}
+
+pub fn mixin_call_expression(input: &str) -> ParseResult<Expression> {
+    let (input, mixin_call) = mixin_call(input)?;
+    Ok((input, Expression::MixinCall(mixin_call, vec![])))
 }
 
 fn mixin_selector(input: &str) -> ParseResult<Vec<SimpleSelector>> {

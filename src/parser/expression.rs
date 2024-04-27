@@ -8,6 +8,7 @@ use nom::Parser;
 use crate::ast::{BinaryOperator, Expression, Lookup};
 use crate::lexer::{at_keyword, ident, numeric, symbol, token};
 use crate::parser::block_of_items;
+use crate::parser::mixin::mixin_call_expression;
 use crate::parser::string::string;
 use crate::{ParseError, ParseResult};
 
@@ -136,7 +137,7 @@ fn simple_expression(input: &str) -> ParseResult<Expression> {
         property,
         // url,
         function_call,
-        // mixin_call, // includes mixin_lookup?
+        mixin_call_expression,
         ident_value,
         // TODO: logical_operation is only valid in a boolean expression? For other expressions it should be sum_operation?
         sub(logical_operation),
