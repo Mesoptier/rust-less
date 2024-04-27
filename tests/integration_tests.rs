@@ -4,8 +4,6 @@ use std::process::Command;
 
 use assert_json_diff::assert_json_matches;
 
-use less::ast::Stylesheet;
-
 include!(concat!(env!("OUT_DIR"), "/integration_tests_generated.rs"));
 
 fn test_file(path: &str) {
@@ -28,7 +26,7 @@ fn test_file(path: &str) {
     let config = assert_json_diff::Config::new(assert_json_diff::CompareMode::Inclusive)
         .numeric_mode(assert_json_diff::NumericMode::AssumeFloat);
 
-    assert_json_matches!(expected, actual, config);
+    assert_json_matches!(actual, expected, config);
 }
 
 fn less_js_parse(filename: &str) -> serde_json::Value {
@@ -117,7 +115,40 @@ impl ToLessJsAst for less::ast::Item<'_> {
                 })
             }
             Item::VariableCall { .. } => todo!(),
-            Item::MixinDeclaration { .. } => todo!(),
+            Item::MixinDeclaration {
+                selector,
+                arguments: _arguments,
+                block,
+            } => {
+                serde_json::json!({
+                    "type": "MixinDefinition",
+                    "name": selector.to_string(),
+                    "selectors": [
+                        {
+                            "type": "Selector",
+                            "elements": [
+                                {
+                                    "type": "Element",
+                                    "value": selector.to_string(),
+                                    "combinator": {
+                                        "type": "Combinator",
+                                        "value": "",
+                                        "emptyOrWhitespace": true,
+                                    },
+                                    "isVariable": false,
+                                }
+                            ],
+                            "evaldCondition": true,
+                        }
+                    ],
+                    // "params": [],
+                    // "variadic": false,
+                    // "arity": 0,
+                    "rules": block.items.iter().map(|item| item.to_less_js_ast()).collect::<Vec<_>>(),
+                    // "required": 0,
+                    // "optionalParameters": [],
+                })
+            }
             Item::MixinCall { .. } => todo!(),
         }
     }
@@ -151,16 +182,42 @@ impl ToLessJsAst for less::ast::Expression<'_> {
             }
             Expression::DetachedRuleset(_) => todo!(),
             Expression::UnaryOperation(_, _) => todo!(),
-            Expression::BinaryOperation(_, _, _) => todo!(),
+            Expression::BinaryOperation(op, lhs, rhs) => {
+                let mut operands = vec![lhs.to_less_js_ast(), rhs.to_less_js_ast()];
+                for operand in &mut operands {
+                    operand
+                        .as_object_mut()
+                        .unwrap()
+                        .insert("parensInOp".to_string(), serde_json::json!(true));
+                }
+
+                serde_json::json!({
+                    "type": "Operation",
+                    "op": op.to_string(),
+                    "operands": operands,
+                })
+            }
             Expression::Variable(name) => {
                 serde_json::json!({
                     "type": "Variable",
                     "name": format!("@{}", name),
                 })
             }
-            Expression::VariableLookup(_, _) => todo!(),
+            Expression::VariableLookup(name, lookups) => {
+                serde_json::json!({
+                    "type": "NamespaceValue",
+                    "value": {
+                        "type": "VariableCall",
+                        "variable": format!("@{}", name),
+                    },
+                    "lookups": lookups.iter().map(|lookup| lookup.to_string()).collect::<Vec<_>>(),
+                })
+            }
             Expression::Property(_) => todo!(),
-            Expression::Ident(_) => todo!(),
+            Expression::Ident(value) => serde_json::json!({
+                "type": "Keyword",
+                "value": value,
+            }),
             Expression::Numeric(value, unit) => {
                 let unit = match unit {
                     Some(unit) => serde_json::json!({
@@ -169,7 +226,11 @@ impl ToLessJsAst for less::ast::Expression<'_> {
                         "denominator": [],
                         "backupUnit": unit,
                     }),
-                    None => serde_json::json!(null),
+                    None => serde_json::json!({
+                        "type": "Unit",
+                        "numerator": [],
+                        "denominator": [],
+                    }),
                 };
                 serde_json::json!({
                     "type": "Dimension",
@@ -177,10 +238,43 @@ impl ToLessJsAst for less::ast::Expression<'_> {
                     "unit": unit,
                 })
             }
-            Expression::FunctionCall(_, _) => todo!(),
-            Expression::QuotedString(_) => todo!(),
+            Expression::FunctionCall(name, args) => {
+                let args = args.simplify();
+                let args = match args {
+                    Expression::SemicolonList(values) | Expression::CommaList(values) => values
+                        .iter()
+                        .map(|v| v.to_less_js_ast())
+                        .collect::<Vec<_>>(),
+                    Expression::SpaceList(_) => unreachable!("SpaceList should be simplified"),
+                    _ => vec![args.to_less_js_ast()],
+                };
+
+                serde_json::json!({
+                    "type": "Call",
+                    "name": name,
+                    "args": args,
+                    "calc": name == "calc",
+                })
+            }
+            Expression::QuotedString(value) => {
+                serde_json::json!({
+                    "type": "Quoted",
+                    "escaped": false,
+                    "value": value,
+                })
+            }
             Expression::InterpolatedString(_, _) => todo!(),
-            Expression::MixinCall(_, _) => todo!(),
+            Expression::MixinCall(
+                less::ast::MixinCall {
+                    selector: _selector,
+                    arguments: _arguments,
+                },
+                _,
+            ) => {
+                serde_json::json!({
+                    "type": "MixinCall",
+                })
+            }
         }
     }
 }
@@ -202,18 +296,7 @@ impl ToLessJsAst for less::ast::Selector<'_> {
         for (idx, seq) in self.0.iter().enumerate() {
             let mut value = String::new();
             for element in &seq.0 {
-                value.push_str(&match element {
-                    less::ast::SimpleSelector::Universal => "*".to_string(),
-                    less::ast::SimpleSelector::Type(t) => t.to_string(),
-                    less::ast::SimpleSelector::Id(id) => format!("#{}", id),
-                    less::ast::SimpleSelector::Class(class) => format!(".{}", class),
-                    less::ast::SimpleSelector::Attribute(name) => {
-                        format!("[{}]", name)
-                    }
-                    less::ast::SimpleSelector::PseudoElement(pe) => format!("::{}", pe),
-                    less::ast::SimpleSelector::PseudoClass(pc) => format!(":{}", pc),
-                    less::ast::SimpleSelector::Negation(_) => todo!(),
-                });
+                value.push_str(&element.to_string());
             }
 
             let combinator_value = if idx > 0 {

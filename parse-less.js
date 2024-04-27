@@ -45,17 +45,23 @@ getLessSource()
         return less.parse(lessSource);
     })
     .then((node) => {
-        process.stdout.write(JSON.stringify(toJSON(node, null), null, 2));
-
+        const json = toJSON(node);
+        process.stdout.write(JSON.stringify(json, null, 2));
         process.exit(0);
     });
 
 function toJSON(node, parent) {
+    if (Array.isArray(node)) {
+        return node.map((child) => toJSON(child, parent));
+    }
     if (typeof node !== 'object' || node === null || !('type' in node)) {
         return node;
     }
 
-    if (node instanceof less.tree.Declaration) {
+    if (node.type === 'Expression' && node.parens) {
+        return toJSON(node.value[0], parent);
+    }
+    if (node.type === 'Declaration') {
         parent.parseValue(node);
     }
 
@@ -67,14 +73,21 @@ function toJSON(node, parent) {
         if (key.startsWith('_')) {
             return;
         }
-        if (['parent', 'allowRoot', 'functionRegistry', 'parsed', 'strictImports'].includes(key)) {
+        const keyBlacklist = [
+            'parent',
+            'allowRoot',
+            'functionRegistry',
+            'parsed',
+            'strictImports',
+            'isSpaced',
+            'variableRegex',
+            'propRegex',
+            'quote',
+        ];
+        if (keyBlacklist.includes(key)) {
             return;
         }
         if (typeof value === 'function') {
-            return;
-        }
-        if (Array.isArray(value)) {
-            json[key] = value.map((child) => toJSON(child, node));
             return;
         }
         json[key] = toJSON(value, node);
