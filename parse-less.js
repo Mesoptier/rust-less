@@ -52,19 +52,25 @@ getLessSource()
         process.exit(0);
     });
 
-function toJSON(node, parent) {
+function toJSON(node) {
     if (Array.isArray(node)) {
-        return node.map((child) => toJSON(child, parent));
+        return node.map((child) => toJSON(child));
     }
-    if (typeof node !== 'object' || node === null || !('type' in node)) {
+    if (typeof node !== 'object' || node === null) {
         return node;
+    }
+    if (!(node instanceof less.tree.Node)) {
+        console.error(`Unexpected object`, node);
+        throw new Error('Unexpected object');
     }
 
     if (node.type === 'Expression' && node.parens) {
-        return toJSON(node.value[0], parent);
+        return toJSON(node.value[0]);
     }
     if (node.type === 'Declaration') {
-        parent.parseValue(node);
+        if (node.parent?.type === 'Ruleset') {
+            node.parent.parseValue(node);
+        }
     }
 
     const json = {
@@ -89,10 +95,38 @@ function toJSON(node, parent) {
         if (keyBlacklist.includes(key)) {
             return;
         }
+
+        if (node.type === 'MixinDefinition') {
+            if (key === 'params') {
+                json[key] = value.map((param) => ({
+                    ...param,
+                    value: toJSON(param.value),
+                }));
+                return;
+            }
+        }
+
+        if (node.type === 'MixinCall') {
+            if (key === 'arguments') {
+                json[key] = value.map((param) => ({
+                    ...param,
+                    value: toJSON(param.value),
+                }));
+                return;
+            }
+        }
+
+        if (node.type === 'Import') {
+            if (key === 'options') {
+                json[key] = value;
+                return;
+            }
+        }
+
         if (typeof value === 'function') {
             return;
         }
-        json[key] = toJSON(value, node);
+        json[key] = toJSON(value);
     });
 
     return json;
