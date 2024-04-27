@@ -42,7 +42,9 @@ async function getLessSource() {
 
 getLessSource()
     .then((lessSource) => {
-        return less.parse(lessSource);
+        return less.parse(lessSource, {
+            processImports: false,
+        });
     })
     .then((node) => {
         const json = toJSON(node);
