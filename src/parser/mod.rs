@@ -1,7 +1,7 @@
 use nom::branch::alt;
 use nom::combinator::{cut, map, opt};
 use nom::multi::many0;
-use nom::sequence::{delimited, preceded, terminated};
+use nom::sequence::{delimited, preceded, terminated, tuple};
 
 use crate::ast::*;
 use crate::lexer::{at_keyword, ident, parse, symbol, token};
@@ -68,9 +68,13 @@ fn declaration(input: &str) -> ParseResult<Item> {
 
     let (input, name) = token(ident)(input)?;
     let (input, _) = symbol(":")(input)?;
-    let (input, value) = declaration_value(input)?;
-    let (input, important) = important(input)?;
-    let (input, _) = symbol(";")(input)?;
+    // We're definitely in a declaration, so we can use cut to prevent backtracking
+    let (input, (value, important, _)) = cut(tuple((
+        declaration_value,
+        important,
+        symbol(";"),
+    )))(input)?;
+    
     Ok((
         input,
         Item::Declaration {
