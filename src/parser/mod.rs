@@ -1,7 +1,7 @@
 use nom::branch::alt;
 use nom::combinator::{cut, map, opt};
 use nom::multi::many0;
-use nom::sequence::{delimited, preceded};
+use nom::sequence::{delimited, preceded, terminated};
 
 use crate::ast::*;
 use crate::lexer::{at_keyword, ident, parse, symbol, token};
@@ -40,7 +40,9 @@ fn guarded_block(input: &str) -> ParseResult<GuardedBlock> {
 }
 
 fn block_of_items(input: &str) -> ParseResult<Vec<Item>> {
-    delimited(symbol("{"), cut(list_of_items), symbol("}"))(input)
+    let (input, _) = symbol("{")(input)?;
+    // We're definitely in a block, so we can use cut to prevent backtracking
+    cut(terminated(list_of_items, symbol("}")))(input)
 }
 
 fn list_of_items(input: &str) -> ParseResult<Vec<Item>> {
