@@ -4,6 +4,8 @@ use std::process::Command;
 
 use assert_json_diff::assert_json_matches;
 
+use less::ast::Stylesheet;
+
 include!(concat!(env!("OUT_DIR"), "/integration_tests_generated.rs"));
 
 fn test_file(path: &str) {
@@ -13,7 +15,15 @@ fn test_file(path: &str) {
 
     let expected = less_js_parse(path);
 
-    let actual = less::parse(&source).unwrap().to_less_js_ast();
+    let actual = match less::parse(&source) {
+        Ok(stylesheet) => stylesheet.to_less_js_ast(),
+        Err(error) => {
+            panic!(
+                "Failed to parse LESS file: {}",
+                nom::error::convert_error(source.as_str(), error)
+            );
+        }
+    };
 
     let config = assert_json_diff::Config::new(assert_json_diff::CompareMode::Inclusive)
         .numeric_mode(assert_json_diff::NumericMode::AssumeFloat);
