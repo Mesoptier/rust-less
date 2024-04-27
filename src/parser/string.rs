@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::{anychar, char};
-use nom::combinator::{map, peek, recognize};
+use nom::combinator::{map, opt, peek, recognize};
 use nom::error::ErrorKind;
 use nom::multi::{fold_many1, many_till};
 use nom::sequence::{delimited, pair};
@@ -15,6 +15,10 @@ use crate::ParseResult;
 /// Parse a quoted or interpolated string, starting and ending with the given `quote`.
 pub fn string(quote: char) -> impl Fn(&str) -> ParseResult<Expression> {
     move |input: &str| {
+        let (input, escaped) = opt(char('~'))(input)?;
+        let _escaped = escaped.is_some();
+        // TODO: Handle escaped strings
+        
         // Start quote
         let (input, _) = char(quote)(input)?;
         // First string part
