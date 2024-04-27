@@ -155,7 +155,7 @@ fn function_call(input: &str) -> ParseResult<Expression> {
 fn function_args(input: &str) -> ParseResult<Expression> {
     semicolon_list(comma_list(alt((
         detached_ruleset,
-        space_list(simple_expression),
+        comma_separated_arg_value,
     ))))(input)
 }
 
