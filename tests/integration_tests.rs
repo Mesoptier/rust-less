@@ -31,11 +31,36 @@ fn less_js_parse(filename: &str) -> serde_json::Value {
 
     let output = String::from_utf8(output.stdout).unwrap();
 
-    // println!("{}", output);
-    
-    // TODO: Replace integer values with floating point values
+    let mut json_value: serde_json::Value = serde_json::from_str(&output).unwrap();
 
-    serde_json::from_str(&output).unwrap()
+    // Replace integer values with floating point values
+    visit_mut(&mut json_value, &mut |value| {
+        if let serde_json::Value::Number(number) = value {
+            if !number.is_f64() {
+                *value = serde_json::Value::Number(serde_json::Number::from_f64(number.as_f64().unwrap()).unwrap());
+            }
+        }
+    });
+
+    json_value
+}
+
+fn visit_mut(value: &mut serde_json::Value, f: &mut impl FnMut(&mut serde_json::Value)) {
+    f(value);
+
+    match value {
+        serde_json::Value::Object(map) => {
+            for (_, value) in map {
+                visit_mut(value, f);
+            }
+        },
+        serde_json::Value::Array(vec) => {
+            for value in vec {
+                visit_mut(value, f);
+            }
+        },
+        _ => {},
+    }
 }
 
 trait ToLessJsAst {
@@ -177,7 +202,7 @@ impl ToLessJsAst for less::ast::SelectorGroup<'_> {
 impl ToLessJsAst for less::ast::Selector<'_> {
     fn to_less_js_ast(&self) -> serde_json::Value {
         let mut elements = Vec::new();
-        
+
         for (idx, seq) in self.0.iter().enumerate() {
             let mut value = String::new();
             for element in &seq.0 {
@@ -194,7 +219,7 @@ impl ToLessJsAst for less::ast::Selector<'_> {
                     less::ast::SimpleSelector::Negation(_) => todo!(),
                 });
             }
-            
+
             let combinator_value = if idx > 0 {
                 match self.1[idx - 1] {
                     less::ast::Combinator::Descendant => " ",
@@ -205,7 +230,7 @@ impl ToLessJsAst for less::ast::Selector<'_> {
             } else {
                 " "
             };
-            
+
             elements.push(serde_json::json!({
                 "type": "Element",
                 "value": value,
@@ -243,7 +268,7 @@ impl ToLessJsAst for less::ast::SimpleSelectorSequence<'_> {
                 less::ast::SimpleSelector::Negation(_) => todo!(),
             });
         }
-        
+
         serde_json::json!(string)
     }
 }
