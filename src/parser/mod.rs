@@ -20,7 +20,7 @@ mod mixin;
 mod selector;
 mod string;
 
-fn parse_stylesheet(input: &str) -> IResult<&str, Stylesheet> {
+pub(crate) fn parse_stylesheet(input: &str) -> IResult<&str, Stylesheet> {
     parse(stylesheet)(input)
 }
 
