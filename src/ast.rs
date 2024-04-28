@@ -60,7 +60,13 @@ pub enum MixinDeclarationArgument<'i> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct MixinCall<'i> {
     pub selector: Vec<SimpleSelector<'i>>,
-    pub arguments: Vec<Expression<'i>>,
+    pub arguments: Vec<MixinCallArgument<'i>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MixinCallArgument<'i> {
+    pub name: Option<Cow<'i, str>>,
+    pub value: Expression<'i>,
 }
 
 //
