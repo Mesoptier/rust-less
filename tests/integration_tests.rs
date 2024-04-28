@@ -120,6 +120,8 @@ impl ToLessJsAst for less::ast::Item<'_> {
                 arguments: _arguments,
                 block,
             } => {
+                // TODO: Handle arguments
+
                 serde_json::json!({
                     "type": "MixinDefinition",
                     "name": selector.to_string(),
@@ -141,15 +143,22 @@ impl ToLessJsAst for less::ast::Item<'_> {
                             "evaldCondition": true,
                         }
                     ],
-                    // "params": [],
-                    // "variadic": false,
-                    // "arity": 0,
                     "rules": block.items.iter().map(|item| item.to_less_js_ast()).collect::<Vec<_>>(),
-                    // "required": 0,
-                    // "optionalParameters": [],
+                    "params": [],
+                    "variadic": false,
+                    "arity": 0,
+                    "required": 0,
+                    "optionalParameters": [],
                 })
             }
-            Item::MixinCall { .. } => todo!(),
+            Item::MixinCall(mixin_call) => {
+                let mut json = mixin_call.to_less_js_ast();
+                // TODO: Add important field to Item::MixinCall
+                json.as_object_mut()
+                    .unwrap()
+                    .insert("important".into(), serde_json::json!(false));
+                json
+            }
         }
     }
 }
@@ -307,7 +316,7 @@ impl ToLessJsAst for less::ast::Selector<'_> {
                     less::ast::Combinator::SubsequentSibling => "~",
                 }
             } else {
-                " "
+                ""
             };
 
             elements.push(serde_json::json!({
@@ -316,7 +325,7 @@ impl ToLessJsAst for less::ast::Selector<'_> {
                 "combinator": {
                     "type": "Combinator",
                     "value": combinator_value,
-                    "emptyOrWhitespace": combinator_value == " ",
+                    "emptyOrWhitespace": combinator_value.is_empty() || combinator_value == " ",
                 },
                 "isVariable": false,
             }));
@@ -349,5 +358,48 @@ impl ToLessJsAst for less::ast::SimpleSelectorSequence<'_> {
         }
 
         serde_json::json!(string)
+    }
+}
+
+impl ToLessJsAst for less::ast::MixinCall<'_> {
+    fn to_less_js_ast(&self) -> serde_json::Value {
+        let selector_elements = self
+            .selector
+            .iter()
+            .map(|element| {
+                serde_json::json!({
+                    "type": "Element",
+                    "value": element.to_string(),
+                    "combinator": {
+                        "type": "Combinator",
+                        "value": "",
+                        "emptyOrWhitespace": true,
+                    },
+                    "isVariable": false,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let arguments = self
+            .arguments
+            .iter()
+            .map(|arg| arg.to_less_js_ast())
+            .collect::<Vec<_>>();
+
+        serde_json::json!({
+            "type": "MixinCall",
+            "selector": {
+                "type": "Selector",
+                "evaldCondition": true,
+                "elements": selector_elements,
+            },
+            "arguments": arguments,
+        })
+    }
+}
+
+impl ToLessJsAst for less::ast::MixinCallArgument<'_> {
+    fn to_less_js_ast(&self) -> serde_json::Value {
+        todo!()
     }
 }

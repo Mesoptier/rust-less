@@ -47,14 +47,17 @@ getLessSource()
         });
     })
     .then((node) => {
-        const json = toJSON(node);
+        const json = toJSON(node, {});
         process.stdout.write(JSON.stringify(json, null, 2));
         process.exit(0);
     });
 
-function toJSON(node) {
+function toJSON(node, context) {
     if (Array.isArray(node)) {
-        return node.map((child) => toJSON(child));
+        return node.map((child, index) => toJSON(child, {
+            ...context,
+            inFirstElement: index === 0 && child.type === 'Element',
+        }));
     }
     if (typeof node !== 'object' || node === null) {
         return node;
@@ -65,12 +68,16 @@ function toJSON(node) {
     }
 
     if (node.type === 'Expression' && node.parens) {
-        return toJSON(node.value[0]);
+        return toJSON(node.value[0], context);
     }
     if (node.type === 'Declaration') {
         if (node.parent?.type === 'Ruleset') {
             node.parent.parseValue(node);
         }
+    }
+    if (node.type === 'Combinator' && (context.inMixinSelector || context.inFirstElement)) {
+        node.value = '';
+        node.emptyOrWhitespace = true;
     }
 
     const json = {
@@ -100,7 +107,7 @@ function toJSON(node) {
             if (key === 'params') {
                 json[key] = value.map((param) => ({
                     ...param,
-                    value: toJSON(param.value),
+                    value: toJSON(param.value, context),
                 }));
                 return;
             }
@@ -110,8 +117,15 @@ function toJSON(node) {
             if (key === 'arguments') {
                 json[key] = value.map((param) => ({
                     ...param,
-                    value: toJSON(param.value),
+                    value: toJSON(param.value, context),
                 }));
+                return;
+            }
+            if (key === 'selector') {
+                json[key] = toJSON(value, {
+                    ...context,
+                    inMixinSelector: true,
+                });
                 return;
             }
         }
@@ -126,7 +140,7 @@ function toJSON(node) {
         if (typeof value === 'function') {
             return;
         }
-        json[key] = toJSON(value);
+        json[key] = toJSON(value, context);
     });
 
     return json;
