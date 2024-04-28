@@ -1,65 +1,61 @@
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::combinator::{cut, map, value};
-use nom::error::Error;
 use nom::multi::{fold_many0, many1, separated_list1};
 use nom::sequence::{delimited, pair, preceded, terminated};
-use nom::{IResult, Parser};
+use nom::Parser;
 
 use crate::ast::{BinaryOperator, Expression, Lookup};
 use crate::lexer::{at_keyword, ident, numeric, symbol, token};
 use crate::parser::block_of_items;
+use crate::parser::mixin::mixin_call_expression;
 use crate::parser::string::string;
-
-/// Parse a variable declaration's value
-pub fn variable_declaration_value(input: &str) -> IResult<&str, Expression> {
-    alt((detached_ruleset, comma_list(space_list(sum_operation))))(input)
-}
+use crate::{ParseError, ParseResult};
 
 /// Parse a declaration's value
-pub fn declaration_value(input: &str) -> IResult<&str, Expression> {
+pub fn declaration_value(input: &str) -> ParseResult<Expression> {
     comma_list(space_list(sum_operation))(input)
 }
 
-pub fn comma_separated_arg_value(input: &str) -> IResult<&str, Expression> {
+pub fn comma_separated_arg_value(input: &str) -> ParseResult<Expression> {
     space_list(sum_operation)(input)
 }
-pub fn semicolon_separated_arg_value(input: &str) -> IResult<&str, Expression> {
+pub fn semicolon_separated_arg_value(input: &str) -> ParseResult<Expression> {
     comma_list(space_list(sum_operation))(input)
 }
 
-pub fn boolean_expression(input: &str) -> IResult<&str, Expression> {
+pub fn boolean_expression(input: &str) -> ParseResult<Expression> {
     logical_operation(input)
 }
 
-fn sub<'i, F>(f: F) -> impl FnMut(&'i str) -> IResult<&str, Expression>
+fn sub<'i, F>(f: F) -> impl FnMut(&'i str) -> ParseResult<Expression>
 where
-    F: Parser<&'i str, Expression<'i>, Error<&'i str>>,
+    F: Parser<&'i str, Expression<'i>, ParseError<'i>>,
 {
     delimited(symbol("("), f, symbol(")"))
 }
 
-fn semicolon_list<'i, F>(f: F) -> impl FnMut(&'i str) -> IResult<&'i str, Expression<'i>>
+fn semicolon_list<'i, F>(f: F) -> impl FnMut(&'i str) -> ParseResult<Expression>
 where
-    F: Parser<&'i str, Expression<'i>, Error<&'i str>>,
+    F: Parser<&'i str, Expression<'i>, ParseError<'i>>,
 {
     map(separated_list1(symbol(";"), f), |values| {
         Expression::SemicolonList(values)
     })
 }
 
-fn comma_list<'i, F>(f: F) -> impl FnMut(&'i str) -> IResult<&'i str, Expression<'i>>
+fn comma_list<'i, F>(f: F) -> impl FnMut(&'i str) -> ParseResult<Expression>
 where
-    F: Parser<&'i str, Expression<'i>, Error<&'i str>>,
+    F: Parser<&'i str, Expression<'i>, ParseError<'i>>,
 {
     map(separated_list1(symbol(","), f), |values| {
         Expression::CommaList(values)
     })
 }
 
-fn space_list<'i, F>(f: F) -> impl FnMut(&'i str) -> IResult<&'i str, Expression<'i>>
+fn space_list<'i, F>(f: F) -> impl FnMut(&'i str) -> ParseResult<Expression>
 where
-    F: Parser<&'i str, Expression<'i>, Error<&'i str>>,
+    F: Parser<&'i str, Expression<'i>, ParseError<'i>>,
 {
     map(many1(f), |values| Expression::SpaceList(values))
 }
@@ -67,10 +63,10 @@ where
 fn binary_operation<'i, F, G>(
     mut operand: F,
     operator: G,
-) -> impl FnOnce(&'i str) -> IResult<&'i str, Expression<'i>>
+) -> impl FnOnce(&'i str) -> ParseResult<Expression>
 where
-    F: Parser<&'i str, Expression<'i>, Error<&'i str>>,
-    G: Parser<&'i str, BinaryOperator, Error<&'i str>>,
+    F: Parser<&'i str, Expression<'i>, ParseError<'i>>,
+    G: Parser<&'i str, BinaryOperator, ParseError<'i>>,
 {
     move |input: &'i str| {
         let (input, first) = operand.parse(input)?;
@@ -82,7 +78,7 @@ where
     }
 }
 
-fn logical_operation(input: &str) -> IResult<&str, Expression> {
+fn logical_operation(input: &str) -> ParseResult<Expression> {
     binary_operation(
         comparison_operation,
         alt((
@@ -92,7 +88,7 @@ fn logical_operation(input: &str) -> IResult<&str, Expression> {
     )(input)
 }
 
-fn comparison_operation(input: &str) -> IResult<&str, Expression> {
+fn comparison_operation(input: &str) -> ParseResult<Expression> {
     binary_operation(
         sum_operation,
         alt((
@@ -105,7 +101,7 @@ fn comparison_operation(input: &str) -> IResult<&str, Expression> {
     )(input)
 }
 
-fn sum_operation(input: &str) -> IResult<&str, Expression> {
+fn sum_operation(input: &str) -> ParseResult<Expression> {
     binary_operation(
         product_operation,
         alt((
@@ -115,7 +111,7 @@ fn sum_operation(input: &str) -> IResult<&str, Expression> {
     )(input)
 }
 
-fn product_operation(input: &str) -> IResult<&str, Expression> {
+fn product_operation(input: &str) -> ParseResult<Expression> {
     binary_operation(
         simple_expression,
         alt((
@@ -125,7 +121,7 @@ fn product_operation(input: &str) -> IResult<&str, Expression> {
     )(input)
 }
 
-fn simple_expression(input: &str) -> IResult<&str, Expression> {
+fn simple_expression(input: &str) -> ParseResult<Expression> {
     alt((
         numeric_value,
         // color,
@@ -136,7 +132,7 @@ fn simple_expression(input: &str) -> IResult<&str, Expression> {
         property,
         // url,
         function_call,
-        // mixin_call, // includes mixin_lookup?
+        mixin_call_expression,
         ident_value,
         // TODO: logical_operation is only valid in a boolean expression? For other expressions it should be sum_operation?
         sub(logical_operation),
@@ -144,29 +140,29 @@ fn simple_expression(input: &str) -> IResult<&str, Expression> {
 }
 
 /// Parse a function call (e.g. `rgb(255, 0, 255)`)
-fn function_call(input: &str) -> IResult<&str, Expression> {
+fn function_call(input: &str) -> ParseResult<Expression> {
     let (input, name) = terminated(ident, symbol("("))(input)?;
-    let (input, args) = function_args(input)?;
-    let (input, _) = symbol(")")(input)?;
+    // We're definitely in a function call, so we can use cut to prevent backtracking
+    let (input, args) = cut(terminated(function_args, symbol(")")))(input)?;
     Ok((input, Expression::FunctionCall(name, Box::from(args))))
 }
 
 /// Parse a function's argument list (e.g. `(255, 0, 255)`)
-fn function_args(input: &str) -> IResult<&str, Expression> {
+fn function_args(input: &str) -> ParseResult<Expression> {
     semicolon_list(comma_list(alt((
         detached_ruleset,
-        space_list(simple_expression),
+        comma_separated_arg_value,
     ))))(input)
 }
 
 /// Parse a detached ruleset (e.g. `{ color: blue; }`)
-fn detached_ruleset(input: &str) -> IResult<&str, Expression> {
+pub fn detached_ruleset(input: &str) -> ParseResult<Expression> {
     let (input, block) = block_of_items(input)?;
     Ok((input, Expression::DetachedRuleset(block)))
 }
 
 /// Parse a variable or variable lookup (e.g. `@var`, `@var[]`)
-fn variable_or_lookup(input: &str) -> IResult<&str, Expression> {
+fn variable_or_lookup(input: &str) -> ParseResult<Expression> {
     let (input, name) = at_keyword(input)?;
 
     if let Ok((input, lookups)) = many1(lookup)(input) {
@@ -177,7 +173,7 @@ fn variable_or_lookup(input: &str) -> IResult<&str, Expression> {
 }
 
 /// Parse a lookup (e.g. `[]`, `[color]`, `[$@property]`)
-fn lookup(input: &str) -> IResult<&str, Lookup> {
+fn lookup(input: &str) -> ParseResult<Lookup> {
     let inner = alt((
         map(token(preceded(tag("$@"), ident)), Lookup::VariableProperty),
         map(token(preceded(tag("@@"), ident)), Lookup::VariableVariable),
@@ -190,24 +186,24 @@ fn lookup(input: &str) -> IResult<&str, Lookup> {
 }
 
 /// Parse a variable (e.g. `@var`)
-fn variable(input: &str) -> IResult<&str, Expression> {
+fn variable(input: &str) -> ParseResult<Expression> {
     map(token(preceded(tag("@"), ident)), Expression::Variable)(input)
 }
 
 /// Parse a property accessor (e.g. `$color`)
-fn property(input: &str) -> IResult<&str, Expression> {
+fn property(input: &str) -> ParseResult<Expression> {
     map(token(preceded(tag("$"), ident)), Expression::Property)(input)
 }
 
 /// Parse a numeric value
-fn numeric_value(input: &str) -> IResult<&str, Expression> {
+fn numeric_value(input: &str) -> ParseResult<Expression> {
     map(token(numeric), |(value, unit)| {
         Expression::Numeric(value, unit)
     })(input)
 }
 
 /// Consume an ident value (e.g. `inherit`)
-fn ident_value(input: &str) -> IResult<&str, Expression> {
+fn ident_value(input: &str) -> ParseResult<Expression> {
     map(token(ident), Expression::Ident)(input)
 }
 
@@ -215,7 +211,8 @@ fn ident_value(input: &str) -> IResult<&str, Expression> {
 mod tests {
     use crate::ast::{BinaryOperator, Expression, Lookup};
     use crate::parser::expression::{
-        boolean_expression, function_call, lookup, property, variable, variable_or_lookup,
+        boolean_expression, declaration_value, function_call, lookup, property, variable,
+        variable_or_lookup,
     };
 
     #[test]
@@ -393,5 +390,40 @@ mod tests {
         for (input, expected) in cases {
             assert_eq!(property(input), expected);
         }
+    }
+
+    #[test]
+    fn test_sub_expression() {
+        assert_eq!(
+            declaration_value("(3 * 1)"),
+            Ok((
+                "",
+                Expression::CommaList(vec![Expression::SpaceList(vec![
+                    Expression::BinaryOperation(
+                        BinaryOperator::Multiply,
+                        Expression::Numeric(3.0, None).into(),
+                        Expression::Numeric(1.0, None).into(),
+                    )
+                ])]),
+            ))
+        );
+        assert_eq!(
+            declaration_value("2 - (3 * 1)"),
+            Ok((
+                "",
+                Expression::CommaList(vec![Expression::SpaceList(vec![
+                    Expression::BinaryOperation(
+                        BinaryOperator::Subtract,
+                        Expression::Numeric(2.0, None).into(),
+                        Expression::BinaryOperation(
+                            BinaryOperator::Multiply,
+                            Expression::Numeric(3.0, None).into(),
+                            Expression::Numeric(1.0, None).into(),
+                        )
+                        .into(),
+                    )
+                ])]),
+            ))
+        );
     }
 }

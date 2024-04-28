@@ -40,7 +40,7 @@ pub enum Item<'i> {
         block: GuardedBlock<'i>,
     },
     /// A LESS mixin call (e.g. `.mixin(@arg: 'blue');`)
-    MixinCall { selector: Vec<SimpleSelector<'i>> },
+    MixinCall(MixinCall<'i>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -55,6 +55,18 @@ pub enum MixinDeclarationArgument<'i> {
     Variadic {
         name: Option<Cow<'i, str>>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MixinCall<'i> {
+    pub selector: Vec<SimpleSelector<'i>>,
+    pub arguments: Vec<MixinCallArgument<'i>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MixinCallArgument<'i> {
+    pub name: Option<Cow<'i, str>>,
+    pub value: Expression<'i>,
 }
 
 //
@@ -86,6 +98,7 @@ pub enum Expression<'i> {
 
     /// A variable reference (e.g. `@primary`)
     Variable(Cow<'i, str>),
+    // TODO: Merge with Variable?
     /// A variable lookup (e.g. `@colors[primary]`)
     VariableLookup(Cow<'i, str>, Vec<Lookup<'i>>),
     /// A property reference (e.g. `$color`)
@@ -100,6 +113,8 @@ pub enum Expression<'i> {
     QuotedString(Cow<'i, str>),
     /// An interpolated string (e.g. `"color is @{color}"`, `"color is ${color}"`)
     InterpolatedString(Vec<Cow<'i, str>>, Vec<InterpolatedValue<'i>>),
+    /// A mixin call (e.g. `.mixin()`), with optional lookup (e.g. `.mixin()[property]`)
+    MixinCall(MixinCall<'i>, Vec<Lookup<'i>>),
 }
 
 impl<'i> Expression<'i> {
@@ -118,6 +133,34 @@ impl<'i> Expression<'i> {
             _ => Some(self.clone()),
         }
     }
+
+    /// Reduce single-item lists to their single item.
+    pub fn simplify(&self) -> Expression {
+        match self {
+            Expression::SemicolonList(values) => {
+                if values.len() == 1 {
+                    values[0].simplify()
+                } else {
+                    Expression::SemicolonList(values.iter().map(|v| v.simplify()).collect())
+                }
+            }
+            Expression::CommaList(values) => {
+                if values.len() == 1 {
+                    values[0].simplify()
+                } else {
+                    Expression::CommaList(values.iter().map(|v| v.simplify()).collect())
+                }
+            }
+            Expression::SpaceList(values) => {
+                if values.len() == 1 {
+                    values[0].simplify()
+                } else {
+                    Expression::SpaceList(values.iter().map(|v| v.simplify()).collect())
+                }
+            }
+            _ => self.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -134,8 +177,23 @@ pub enum Lookup<'i> {
     VariableVariable(Cow<'i, str>),
     /// Lookup property declaration by variable (e.g. `@config[$@variable]`)
     VariableProperty(Cow<'i, str>),
+    // TODO: Is InterpolatedString even possible here?
     /// An interpolated string (e.g. `"color is @{color}"`, `"color is ${color}"`)
     InterpolatedString(Vec<Cow<'i, str>>, Vec<InterpolatedValue<'i>>),
+}
+
+impl<'i> ToString for Lookup<'i> {
+    fn to_string(&self) -> String {
+        match self {
+            Lookup::Last => "".to_string(),
+            Lookup::Ident(name) => format!("{}", name),
+            Lookup::Variable(name) => format!("@{}", name),
+            Lookup::Property(name) => format!("${}", name),
+            Lookup::VariableVariable(name) => format!("@@{}", name),
+            Lookup::VariableProperty(name) => format!("$@{}", name),
+            Lookup::InterpolatedString(_, _) => unimplemented!(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -151,6 +209,24 @@ pub enum BinaryOperator {
     LessThanOrEqualTo,
     GreaterThanOrEqualTo,
     GreaterThan,
+}
+
+impl ToString for BinaryOperator {
+    fn to_string(&self) -> String {
+        match self {
+            BinaryOperator::Add => "+".to_string(),
+            BinaryOperator::Subtract => "-".to_string(),
+            BinaryOperator::Multiply => "*".to_string(),
+            BinaryOperator::Divide => "/".to_string(),
+            BinaryOperator::And => "and".to_string(),
+            BinaryOperator::Or => "or".to_string(),
+            BinaryOperator::Equality => "==".to_string(),
+            BinaryOperator::LessThan => "<".to_string(),
+            BinaryOperator::LessThanOrEqualTo => "<=".to_string(),
+            BinaryOperator::GreaterThanOrEqualTo => ">=".to_string(),
+            BinaryOperator::GreaterThan => ">".to_string(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -210,4 +286,19 @@ pub enum SimpleSelector<'i> {
     PseudoClass(Cow<'i, str>),
     PseudoElement(Cow<'i, str>),
     Negation(Box<SimpleSelector<'i>>),
+}
+
+impl<'i> ToString for SimpleSelector<'i> {
+    fn to_string(&self) -> String {
+        match self {
+            SimpleSelector::Type(name) => name.to_string(),
+            SimpleSelector::Universal => "*".to_string(),
+            SimpleSelector::Id(name) => format!("#{}", name),
+            SimpleSelector::Class(name) => format!(".{}", name),
+            SimpleSelector::Attribute(name) => format!("[{}]", name),
+            SimpleSelector::PseudoClass(name) => format!(":{}", name),
+            SimpleSelector::PseudoElement(name) => format!("::{}", name),
+            SimpleSelector::Negation(selector) => format!(":not({})", selector.to_string()),
+        }
+    }
 }

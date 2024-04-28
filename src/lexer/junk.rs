@@ -3,43 +3,43 @@ use nom::bytes::complete::{tag, take_until, take_while};
 use nom::character::complete::multispace1;
 use nom::combinator::{cut, value};
 use nom::multi::{many0, many1};
-use nom::IResult;
+use crate::ParseResult;
 
-fn whitespace(input: &str) -> IResult<&str, ()> {
+fn whitespace(input: &str) -> ParseResult<()> {
     let (input, _) = multispace1(input)?;
     Ok((input, ()))
 }
 
-fn line_comment(input: &str) -> IResult<&str, ()> {
+fn line_comment(input: &str) -> ParseResult<()> {
     let (input, _) = tag("//")(input)?;
     let (input, _) = take_while(|c| c != '\n')(input)?;
     Ok((input, ()))
 }
 
-fn block_comment(input: &str) -> IResult<&str, ()> {
+fn block_comment(input: &str) -> ParseResult<()> {
     let (input, _) = tag("/*")(input)?;
     let (input, _) = cut(take_until("*/"))(input)?;
     let (input, _) = tag("*/")(input)?;
     Ok((input, ()))
 }
 
-fn junk(input: &str) -> IResult<&str, ()> {
+fn junk(input: &str) -> ParseResult<()> {
     value((), alt((whitespace, line_comment, block_comment)))(input)
 }
 
-pub fn junk0(input: &str) -> IResult<&str, ()> {
+pub fn junk0(input: &str) -> ParseResult<()> {
     value((), many0(junk))(input)
 }
 
-pub fn junk1(input: &str) -> IResult<&str, ()> {
+pub fn junk1(input: &str) -> ParseResult<()> {
     value((), many1(junk))(input)
 }
 
 #[cfg(test)]
 mod tests {
     use nom::error::ErrorKind::TakeUntil;
-    use nom::error::ParseError;
     use nom::Err::Failure;
+    use nom::error::ParseError;
 
     use super::*;
 

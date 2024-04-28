@@ -1,0 +1,7 @@
+{
+  "devDependencies": {
+    "@less/test-data": "^4.2.0",
+    "@types/less": "^3.0.6",
+    "less": "^4.2.0"
+  }
+}

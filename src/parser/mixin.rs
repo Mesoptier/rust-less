@@ -1,17 +1,23 @@
+use std::borrow::Cow;
+
 use nom::branch::alt;
 use nom::bytes::complete::tag;
-use nom::combinator::{cond, fail, opt, value};
+use nom::combinator::{cond, cut, fail, map_res, opt, value};
+use nom::error::context;
 use nom::multi::fold_many0;
 use nom::sequence::{delimited, preceded};
-use nom::IResult;
 
-use crate::ast::{Expression, Item, MixinDeclarationArgument, SimpleSelector};
+use crate::ast::{
+    Expression, Item, MixinCall, MixinCallArgument, MixinDeclarationArgument, SimpleSelector,
+};
 use crate::lexer::{ident, parse, symbol, token};
-use crate::parser;
-use crate::parser::expression::{comma_separated_arg_value, semicolon_separated_arg_value};
+use crate::parser::expression::{
+    comma_separated_arg_value, detached_ruleset, semicolon_separated_arg_value,
+};
 use crate::parser::selector::{class_selector, id_selector};
+use crate::{parser, ParseResult};
 
-pub fn mixin_declaration(input: &str) -> IResult<&str, Item> {
+pub fn mixin_declaration(input: &str) -> ParseResult<Item> {
     let (input, selector) = token(mixin_simple_selector)(input)?;
     let (input, arguments) =
         delimited(symbol("("), mixin_declaration_arguments, symbol(")"))(input)?;
@@ -26,17 +32,34 @@ pub fn mixin_declaration(input: &str) -> IResult<&str, Item> {
     ))
 }
 
-pub fn mixin_call(input: &str) -> IResult<&str, Item> {
+fn mixin_call(input: &str) -> ParseResult<MixinCall> {
     // TODO: Parse arguments
-    // TODO: Parse lookups
 
     let (input, selector) = mixin_selector(input)?;
-    let (input, _) = symbol("()")(input)?;
-    let (input, _) = symbol(";")(input)?;
-    Ok((input, Item::MixinCall { selector }))
+    let (input, _) = symbol("(")(input)?;
+    let (input, arguments) = mixin_call_arguments(input)?;
+    let (input, _) = symbol(")")(input)?;
+    Ok((
+        input,
+        MixinCall {
+            selector,
+            arguments,
+        },
+    ))
 }
 
-fn mixin_selector(input: &str) -> IResult<&str, Vec<SimpleSelector>> {
+pub fn mixin_call_item(input: &str) -> ParseResult<Item> {
+    let (input, mixin_call) = mixin_call(input)?;
+    let (input, _) = symbol(";")(input)?;
+    Ok((input, Item::MixinCall(mixin_call)))
+}
+
+pub fn mixin_call_expression(input: &str) -> ParseResult<Expression> {
+    let (input, mixin_call) = mixin_call(input)?;
+    Ok((input, Expression::MixinCall(mixin_call, vec![])))
+}
+
+fn mixin_selector(input: &str) -> ParseResult<Vec<SimpleSelector>> {
     let (input, first) = token(mixin_simple_selector)(input)?;
 
     token(fold_many0(
@@ -49,129 +72,225 @@ fn mixin_selector(input: &str) -> IResult<&str, Vec<SimpleSelector>> {
     ))(input)
 }
 
-fn mixin_simple_selector(input: &str) -> IResult<&str, SimpleSelector> {
+fn mixin_simple_selector(input: &str) -> ParseResult<SimpleSelector> {
     alt((id_selector, class_selector))(input)
 }
 
 /// Consume a LESS mixin combinator (e.g. ``, ` `, ` > `)
-fn mixin_combinator(input: &str) -> IResult<&str, ()> {
+fn mixin_combinator(input: &str) -> ParseResult<()> {
     value((), parse(opt(symbol(">"))))(input)
 }
 
-fn mixin_declaration_arguments(mut input: &str) -> IResult<&str, Vec<MixinDeclarationArgument>> {
-    let mut args = vec![];
+enum MixinArgument<'i> {
+    /// A variable name (e.g. `@color`), with an optional (default) value (e.g. `@color: blue`)
+    Variable {
+        name: Cow<'i, str>,
+        value: Option<Expression<'i>>,
+    },
+    /// A literal value (e.g. `blue`)
+    Literal { value: Expression<'i> },
+    /// A variadic argument (e.g. `...`), optionally with a name (e.g. `@rest...`)
+    Variadic { name: Option<Cow<'i, str>> },
+}
 
-    let mut is_semicolon_separated = false;
+/// Converts a list of comma-separated mixin arguments to a single semicolon-separated argument.
+fn to_semicolon_separated(args: Vec<MixinArgument>) -> Result<MixinArgument, &'static str> {
+    let mut args_it = args.into_iter();
+
+    let mut values = vec![];
+
+    // Handle the first argument separately, as it may be a named argument
+    let name = match args_it.next() {
+        Some(MixinArgument::Variable { name, value }) => {
+            if let Some(value) = value {
+                values.push(value);
+            }
+            Some(name)
+        }
+        Some(MixinArgument::Literal { value }) => {
+            values.push(value);
+            None
+        }
+        Some(MixinArgument::Variadic { .. }) => {
+            return Err("Variadic arguments must be the last argument");
+        }
+        None => None,
+    };
+
+    // Handle the rest of the arguments
+    for arg in args_it {
+        match arg {
+            MixinArgument::Literal { value } => {
+                values.push(value);
+            }
+            MixinArgument::Variable { .. } => {
+                return Err("Cannot mix comma-separated and semicolon-separated arguments");
+            }
+            MixinArgument::Variadic { .. } => {
+                return Err("Variadic arguments must be the last argument");
+            }
+        }
+    }
+
+    // TODO: Special handling for detached rulesets?
+    let value = if values.is_empty() {
+        None
+    } else {
+        Some(Expression::CommaList(values))
+    };
+    let arg = match (name, value) {
+        (Some(name), value) => MixinArgument::Variable { name, value },
+        (None, Some(value)) => MixinArgument::Literal { value },
+        _ => {
+            return Err("No arguments provided");
+        }
+    };
+
+    Ok(arg)
+}
+
+/// Parse a list of generic mixin arguments, to be transformed into declaration or call arguments.
+fn mixin_arguments(mut input: &str) -> ParseResult<Vec<MixinArgument>> {
+    enum Separator {
+        Comma,
+        Semicolon,
+    }
+
+    let mut args = vec![];
+    let mut separator = Separator::Comma;
 
     loop {
+        // Try parse a variable name
         let name_result = token(preceded(tag("@"), ident))(input);
-        let name = match name_result {
-            Ok((next_input, name)) => {
-                input = next_input;
-                Some(name)
-            }
-            Err(_) => None,
-        };
+        let name = name_result.ok().map(|(next_input, name)| {
+            input = next_input;
+            name
+        });
 
+        // Try parse a variadic argument
         if let Ok((next_input, _)) = token(tag("..."))(input) {
             input = next_input;
-            args.push(MixinDeclarationArgument::Variadic { name });
+            args.push(MixinArgument::Variadic { name });
+
+            // Variadic arguments must be the last argument
             break;
         }
 
+        // Try parse a value
         let value_result = preceded(
+            // If we have a name, we must have a colon before the value
             cond(name.is_some(), token(tag(":"))),
-            alt((if !is_semicolon_separated {
-                comma_separated_arg_value
-            } else {
-                semicolon_separated_arg_value
-            },)),
+            // Colon must be followed by a value, so we can use cut to prevent backtracking
+            cut(alt((
+                // TODO: Detached ruleset should not be allowed in some cases. But maybe this can be
+                //  handled when converting to explicit Mixin(Declaration/Call)Argument structs?
+                detached_ruleset,
+                match separator {
+                    Separator::Comma => comma_separated_arg_value,
+                    Separator::Semicolon => semicolon_separated_arg_value,
+                },
+            ))),
         )(input);
-        let value = match value_result {
-            Ok((next_input, value)) => {
-                input = next_input;
-                Some(value)
-            }
-            Err(_) => None,
+        let value = value_result.ok().map(|(next_input, value)| {
+            input = next_input;
+            value
+        });
+
+        // Push the argument to the list, or break if we've reached the end
+        match (name, value) {
+            // If we have a name, we have a variable
+            (Some(name), value) => args.push(MixinArgument::Variable { name, value }),
+            // If we have a value, we have a literal
+            (None, Some(value)) => args.push(MixinArgument::Literal { value }),
+            // If we have neither a name nor a value, we've reached the end
+            _ => break,
         };
 
-        let mut reached_end = match (name, value) {
-            (Some(name), default) => {
-                args.push(MixinDeclarationArgument::Variable { name, default });
-                false
-            }
-            (None, Some(value)) => {
-                args.push(MixinDeclarationArgument::Literal { value });
-                false
-            }
-            _ => true,
-        };
+        // Parse a separator
+        match separator {
+            Separator::Comma => {
+                if let Ok((next_input, _)) = token(tag(","))(input) {
+                    input = next_input;
+                } else if let Ok((next_input, _)) = token(tag(";"))(input) {
+                    input = next_input;
+                    separator = Separator::Semicolon;
 
-        if is_semicolon_separated {
-            if let Ok((next_input, _)) = token(tag(";"))(input) {
-                input = next_input;
-            } else {
-                reached_end = true;
-            }
-        } else {
-            if let Ok((next_input, _)) = token(tag(","))(input) {
-                input = next_input;
-            } else if let Ok((next_input, _)) = token(tag(";"))(input) {
-                input = next_input;
-                is_semicolon_separated = true;
-
-                // Adjust collected args for semicolon separation
-                let mut args_it = args.into_iter();
-
-                let mut values = vec![];
-                let name = match args_it.next() {
-                    Some(MixinDeclarationArgument::Variable { name, default }) => {
-                        if let Some(value) = default {
-                            values.push(value);
+                    // Adjust collected args for semicolon separation
+                    match to_semicolon_separated(args) {
+                        Ok(arg) => {
+                            args = vec![arg];
                         }
-                        Some(name)
-                    }
-                    Some(MixinDeclarationArgument::Literal { value }) => {
-                        values.push(value);
-                        None
-                    }
-                    Some(_) => {
-                        return fail(input);
-                    }
-                    None => None,
-                };
-
-                for arg in args_it {
-                    match arg {
-                        MixinDeclarationArgument::Literal { value } => {
-                            values.push(value);
-                        }
-                        _ => {
-                            return fail(input);
+                        Err(e) => {
+                            // TODO: Better error handling
+                            return context(e, fail)(input);
                         }
                     }
+                } else {
+                    // If we don't have a comma or semicolon, we've reached the end
+                    break;
                 }
-
-                let value = Expression::CommaList(values);
-                let arg = match name {
-                    Some(name) => MixinDeclarationArgument::Variable {
-                        name,
-                        default: Some(value),
-                    },
-                    None => MixinDeclarationArgument::Literal { value },
-                };
-                args = vec![arg];
-            } else {
-                reached_end = true;
             }
-        }
-
-        if reached_end {
-            break;
+            Separator::Semicolon => {
+                if let Ok((next_input, _)) = token(tag(";"))(input) {
+                    input = next_input;
+                } else {
+                    // If we don't have a semicolon, we've reached the end
+                    break;
+                }
+            }
         }
     }
 
     Ok((input, args))
+}
+
+impl<'i> TryFrom<MixinArgument<'i>> for MixinDeclarationArgument<'i> {
+    type Error = ();
+
+    fn try_from(value: MixinArgument<'i>) -> Result<Self, Self::Error> {
+        match value {
+            MixinArgument::Variable { name, value } => Ok(MixinDeclarationArgument::Variable {
+                name,
+                default: value,
+            }),
+            MixinArgument::Literal { value } => Ok(MixinDeclarationArgument::Literal { value }),
+            MixinArgument::Variadic { name } => Ok(MixinDeclarationArgument::Variadic { name }),
+        }
+    }
+}
+
+fn mixin_declaration_arguments(input: &str) -> ParseResult<Vec<MixinDeclarationArgument>> {
+    map_res(mixin_arguments, |args| {
+        args.into_iter().map(TryInto::try_into).collect()
+    })(input)
+}
+
+impl<'i> TryFrom<MixinArgument<'i>> for MixinCallArgument<'i> {
+    type Error = ();
+
+    fn try_from(value: MixinArgument<'i>) -> Result<Self, Self::Error> {
+        match value {
+            MixinArgument::Variable {
+                name,
+                value: Some(value),
+            } => Ok(MixinCallArgument {
+                name: Some(name),
+                value,
+            }),
+            MixinArgument::Variable { name, value: _ } => Ok(MixinCallArgument {
+                name: None,
+                value: Expression::Variable(name),
+            }),
+            MixinArgument::Literal { value } => Ok(MixinCallArgument { name: None, value }),
+            MixinArgument::Variadic { .. } => Err(()),
+        }
+    }
+}
+
+fn mixin_call_arguments(input: &str) -> ParseResult<Vec<MixinCallArgument>> {
+    map_res(mixin_arguments, |args| {
+        args.into_iter().map(TryInto::try_into).collect()
+    })(input)
 }
 
 #[cfg(test)]
