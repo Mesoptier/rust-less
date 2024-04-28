@@ -12,11 +12,6 @@ use crate::parser::mixin::mixin_call_expression;
 use crate::parser::string::string;
 use crate::{ParseError, ParseResult};
 
-/// Parse a variable declaration's value
-pub fn variable_declaration_value(input: &str) -> ParseResult<Expression> {
-    alt((detached_ruleset, comma_list(space_list(sum_operation))))(input)
-}
-
 /// Parse a declaration's value
 pub fn declaration_value(input: &str) -> ParseResult<Expression> {
     comma_list(space_list(sum_operation))(input)
@@ -161,7 +156,7 @@ fn function_args(input: &str) -> ParseResult<Expression> {
 }
 
 /// Parse a detached ruleset (e.g. `{ color: blue; }`)
-fn detached_ruleset(input: &str) -> ParseResult<Expression> {
+pub fn detached_ruleset(input: &str) -> ParseResult<Expression> {
     let (input, block) = block_of_items(input)?;
     Ok((input, Expression::DetachedRuleset(block)))
 }

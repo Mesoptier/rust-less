@@ -5,9 +5,7 @@ use nom::sequence::{delimited, preceded, terminated, tuple};
 
 use crate::ast::*;
 use crate::lexer::{at_keyword, ident, parse, symbol, token};
-use crate::parser::expression::{
-    boolean_expression, declaration_value, variable_declaration_value,
-};
+use crate::parser::expression::{boolean_expression, declaration_value, detached_ruleset};
 use crate::parser::mixin::{mixin_call_item, mixin_declaration};
 use crate::parser::selector::selector_group;
 use crate::ParseResult;
@@ -105,7 +103,11 @@ fn qualified_rule(input: &str) -> ParseResult<Item> {
 fn variable_declaration(input: &str) -> ParseResult<Item> {
     let (input, name) = terminated(at_keyword, symbol(":"))(input)?;
     // We're definitely in a declaration, so we can use cut to prevent backtracking
-    let (input, value) = cut(terminated(variable_declaration_value, symbol(";")))(input)?;
+    let (input, value) = cut(alt((
+        // Detached ruleset is not required to have a semicolon
+        terminated(detached_ruleset, opt(symbol(";"))),
+        terminated(declaration_value, symbol(";")),
+    )))(input)?;
     Ok((input, Item::VariableDeclaration { name, value }))
 }
 
