@@ -3,7 +3,7 @@ use nom::Finish;
 pub mod ast;
 mod lexer;
 mod parser;
-mod tokenizer;
+mod tokenize;
 mod util;
 
 type ParseError<'i> = nom::error::VerboseError<&'i str>;
