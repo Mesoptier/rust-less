@@ -46,10 +46,10 @@ pub enum Token<'i> {
     Symbol(char),
 }
 
-type TokenStream<'i> = Vec<TokenTree<'i>>;
+pub type TokenStream<'i> = Vec<TokenTree<'i>>;
 
 #[derive(Clone, Debug, PartialEq)]
-enum TokenTree<'i> {
+pub enum TokenTree<'i> {
     Token(Token<'i>),
     Delim(Delim, TokenStream<'i>),
 }
