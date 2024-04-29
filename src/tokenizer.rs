@@ -46,13 +46,15 @@ pub enum Token<'i> {
     Symbol(char),
 }
 
+type TokenStream<'i> = Vec<TokenTree<'i>>;
+
 #[derive(Clone, Debug, PartialEq)]
 enum TokenTree<'i> {
     Token(Token<'i>),
-    Delim(Delim, Vec<TokenTree<'i>>),
+    Delim(Delim, TokenStream<'i>),
 }
 
-pub fn tokenize(input: &str) -> Result<Vec<TokenTree>, String> {
+pub fn tokenize(input: &str) -> Result<TokenStream, String> {
     repeat(0.., token_tree)
         .parse(Stream::new(input))
         .map_err(|e| e.to_string())
