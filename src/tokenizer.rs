@@ -1,7 +1,8 @@
 use std::borrow::Cow;
 
 use winnow::ascii::Caseless;
-use winnow::combinator::{alt, delimited, empty, fail, opt, peek, preceded, repeat, terminated};
+use winnow::combinator::{alt, cut_err, empty, fail, opt, peek, preceded, repeat, terminated};
+use winnow::stream::AsChar;
 use winnow::token::{any, one_of, take_until, take_while};
 use winnow::{dispatch, seq, Located, PResult, Parser};
 
@@ -70,16 +71,20 @@ fn token_tree<'i>(input: &mut Stream<'i>) -> PResult<TokenTree<'i>> {
 
 fn delim<'i>(delim: Delim) -> impl FnMut(&mut Stream<'i>) -> PResult<TokenTree<'i>> {
     move |input| {
-        delimited(delim.open(), repeat(0.., token_tree), delim.close())
-            .map(|tokens| TokenTree::Delim(delim, tokens))
-            .parse_next(input)
+        preceded(
+            delim.open(),
+            cut_err(terminated(repeat(0.., token_tree), delim.close())),
+        )
+        .map(|tokens| TokenTree::Delim(delim, tokens))
+        .parse_next(input)
     }
 }
 
 fn token<'i>(input: &mut Stream<'i>) -> PResult<Token<'i>> {
     alt((
         whitespace,
-        comment,
+        line_comment,
+        block_comment,
         ident,
         hash,
         string,
@@ -95,18 +100,15 @@ fn whitespace<'i>(input: &mut Stream<'i>) -> PResult<Token<'i>> {
         .parse_next(input)
 }
 
-fn comment<'i>(input: &mut Stream<'i>) -> PResult<Token<'i>> {
-    alt((line_comment, block_comment)).parse_next(input)
-}
-
 fn line_comment<'i>(input: &mut Stream<'i>) -> PResult<Token<'i>> {
-    preceded("//", take_until(0.., "\n"))
+    preceded("//", take_while(0.., |c: char| !c.is_newline()))
         .map(|value: &str| Token::Comment(value.into()))
         .parse_next(input)
 }
 
 fn block_comment<'i>(input: &mut Stream<'i>) -> PResult<Token<'i>> {
-    delimited("/*", take_until(0.., "*/"), "*/")
+    "/*".parse_next(input)?;
+    cut_err(terminated(take_until(0.., "*/"), "*/"))
         .map(|value: &str| Token::Comment(value.into()))
         .parse_next(input)
 }
@@ -139,7 +141,7 @@ fn hash<'i>(input: &mut Stream<'i>) -> PResult<Token<'i>> {
 fn string<'i>(input: &mut Stream<'i>) -> PResult<Token<'i>> {
     let quote = one_of(|c| c == '"' || c == '\'').parse_next(input)?;
     // TODO: Deal with escapes and interpolation
-    terminated(take_until(0.., quote), quote)
+    cut_err(terminated(take_until(0.., quote), quote))
         .map(|value: &str| Token::String(value.into()))
         .parse_next(input)
 }
@@ -266,6 +268,41 @@ mod tests {
         let input = Located::new("ident_with_underscore");
         let expected = Ok(Token::Ident("ident_with_underscore".into()));
         assert_eq!(ident.parse(input), expected);
+    }
+
+    #[test]
+    fn test_comment() {
+        let input = "// This is a comment\n";
+        let expected = Ok(vec![
+            token!(Comment(" This is a comment".into())),
+            token!(Whitespace),
+        ]);
+        assert_eq!(tokenize(input), expected);
+
+        let input = "// This is a comment";
+        let expected = Ok(vec![token!(Comment(" This is a comment".into()))]);
+        assert_eq!(tokenize(input), expected);
+
+        let input = "/* This is a comment */";
+        let expected = Ok(vec![token!(Comment(" This is a comment ".into()))]);
+        assert_eq!(tokenize(input), expected);
+
+        let input = "/* This is a comment";
+        assert!(tokenize(input).is_err());
+    }
+
+    #[test]
+    fn test_string() {
+        let input = r#""This is a string""#;
+        let expected = Ok(vec![token!(String("This is a string".into()))]);
+        assert_eq!(tokenize(input), expected);
+
+        let input = r#"'This is a string'"#;
+        let expected = Ok(vec![token!(String("This is a string".into()))]);
+        assert_eq!(tokenize(input), expected);
+
+        let input = r#""This is a string"#;
+        assert!(tokenize(input).is_err());
     }
 
     #[test]
