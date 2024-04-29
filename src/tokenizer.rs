@@ -1,17 +1,37 @@
 use std::borrow::Cow;
 
 use winnow::ascii::Caseless;
-use winnow::combinator::{alt, delimited, empty, fail, opt, preceded, repeat, terminated};
+use winnow::combinator::{alt, delimited, empty, fail, opt, peek, preceded, repeat, terminated};
 use winnow::token::{any, one_of, take_until, take_while};
-use winnow::{seq, Located, PResult, Parser};
+use winnow::{dispatch, seq, Located, PResult, Parser};
 
 use crate::lexer::helpers::{is_digit, is_name, would_start_identifier};
 
-#[derive(Clone, Debug, PartialEq)]
+type Stream<'i> = Located<&'i str>;
+
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Delim {
     Paren,
     Brace,
     Bracket,
+}
+
+impl Delim {
+    pub const fn open(&self) -> char {
+        match self {
+            Delim::Paren => '(',
+            Delim::Brace => '{',
+            Delim::Bracket => '[',
+        }
+    }
+
+    pub const fn close(&self) -> char {
+        match self {
+            Delim::Paren => ')',
+            Delim::Brace => '}',
+            Delim::Bracket => ']',
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -22,19 +42,38 @@ pub enum Token<'i> {
     Hash(Cow<'i, str>),
     String(Cow<'i, str>),
     Number(f32),
-    OpenDelim(Delim),
-    CloseDelim(Delim),
     Symbol(char),
 }
 
-pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
-    tokenize_impl
-        .parse(Located::new(input))
+#[derive(Clone, Debug, PartialEq)]
+enum TokenTree<'i> {
+    Token(Token<'i>),
+    Delim(Delim, Vec<TokenTree<'i>>),
+}
+
+pub fn tokenize(input: &str) -> Result<Vec<TokenTree>, String> {
+    repeat(0.., token_tree)
+        .parse(Stream::new(input))
         .map_err(|e| e.to_string())
 }
 
-fn tokenize_impl<'i>(input: &mut Located<&'i str>) -> PResult<Vec<Token<'i>>> {
-    repeat(0.., token).parse_next(input)
+fn token_tree<'i>(input: &mut Stream<'i>) -> PResult<TokenTree<'i>> {
+    dispatch!(peek(any);
+        '(' => delim(Delim::Paren),
+        '{' => delim(Delim::Brace),
+        '[' => delim(Delim::Bracket),
+        ')' | '}' | ']' => fail,
+        _ => token.map(TokenTree::Token),
+    )
+    .parse_next(input)
+}
+
+fn delim<'i>(delim: Delim) -> impl FnMut(&mut Stream<'i>) -> PResult<TokenTree<'i>> {
+    move |input| {
+        delimited(delim.open(), repeat(0.., token_tree), delim.close())
+            .map(|tokens| TokenTree::Delim(delim, tokens))
+            .parse_next(input)
+    }
 }
 
 fn token<'i>(input: &mut Located<&'i str>) -> PResult<Token<'i>> {
@@ -45,12 +84,6 @@ fn token<'i>(input: &mut Located<&'i str>) -> PResult<Token<'i>> {
         hash,
         string,
         number,
-        '('.value(Token::OpenDelim(Delim::Paren)),
-        '{'.value(Token::OpenDelim(Delim::Brace)),
-        '['.value(Token::OpenDelim(Delim::Bracket)),
-        ')'.value(Token::CloseDelim(Delim::Paren)),
-        '}'.value(Token::CloseDelim(Delim::Brace)),
-        ']'.value(Token::CloseDelim(Delim::Bracket)),
         any.map(Token::Symbol),
     ))
     .parse_next(input)
@@ -160,6 +193,17 @@ fn dec_digits(input: &mut Located<&str>) -> PResult<(u32, u32)> {
 mod tests {
     use super::*;
 
+    macro_rules! token {
+        ($($tt:tt)*) => {
+            TokenTree::Token(Token::$($tt)*)
+        };
+    }
+    macro_rules! delim {
+        ($delim:ident, [$($tokens:tt)*]) => {
+            TokenTree::Delim(Delim::$delim, vec![$($tokens)*])
+        };
+    }
+
     #[test]
     fn test_tokenize() {
         let input = r#"
@@ -168,46 +212,43 @@ mod tests {
             // This is a comment
             "This is a string"
             123.45 15px 20%
-            ( { [ ) } ]
+            (paren) { brace} [bracket ]
         "#;
         assert_eq!(
             tokenize(input),
             Ok(vec![
-                Token::Whitespace,
-                Token::Ident("ident".into()),
-                Token::Whitespace,
-                Token::Ident("ident-with-dash".into()),
-                Token::Whitespace,
-                Token::Ident("ident_with_underscore".into()),
-                Token::Whitespace,
-                Token::Hash("hash".into()),
-                Token::Whitespace,
-                Token::Hash("0ff".into()),
-                Token::Whitespace,
-                Token::Comment(" This is a comment".into()),
-                Token::Whitespace,
-                Token::String("This is a string".into()),
-                Token::Whitespace,
-                Token::Number(123.45),
-                Token::Whitespace,
-                Token::Number(15.0),
-                Token::Ident("px".into()),
-                Token::Whitespace,
-                Token::Number(20.0),
-                Token::Symbol('%'),
-                Token::Whitespace,
-                Token::OpenDelim(Delim::Paren),
-                Token::Whitespace,
-                Token::OpenDelim(Delim::Brace),
-                Token::Whitespace,
-                Token::OpenDelim(Delim::Bracket),
-                Token::Whitespace,
-                Token::CloseDelim(Delim::Paren),
-                Token::Whitespace,
-                Token::CloseDelim(Delim::Brace),
-                Token::Whitespace,
-                Token::CloseDelim(Delim::Bracket),
-                Token::Whitespace,
+                token!(Whitespace),
+                token!(Ident("ident".into())),
+                token!(Whitespace),
+                token!(Ident("ident-with-dash".into())),
+                token!(Whitespace),
+                token!(Ident("ident_with_underscore".into())),
+                token!(Whitespace),
+                token!(Hash("hash".into())),
+                token!(Whitespace),
+                token!(Hash("0ff".into())),
+                token!(Whitespace),
+                token!(Comment(" This is a comment".into())),
+                token!(Whitespace),
+                token!(String("This is a string".into())),
+                token!(Whitespace),
+                token!(Number(123.45)),
+                token!(Whitespace),
+                token!(Number(15.0)),
+                token!(Ident("px".into())),
+                token!(Whitespace),
+                token!(Number(20.0)),
+                token!(Symbol('%')),
+                token!(Whitespace),
+                delim!(Paren, [token!(Ident("paren".into())),]),
+                token!(Whitespace),
+                delim!(Brace, [token!(Whitespace), token!(Ident("brace".into())),]),
+                token!(Whitespace),
+                delim!(
+                    Bracket,
+                    [token!(Ident("bracket".into())), token!(Whitespace),]
+                ),
+                token!(Whitespace),
             ]),
         );
     }
@@ -225,5 +266,15 @@ mod tests {
         let input = Located::new("ident_with_underscore");
         let expected = Ok(Token::Ident("ident_with_underscore".into()));
         assert_eq!(ident.parse(input), expected);
+    }
+
+    #[test]
+    fn print_file() {
+        let path = std::path::Path::new("node_modules/@less/test-data/less/_main/calc.less");
+        let file = std::fs::read_to_string(path).unwrap();
+        let tokens = tokenize(&file).unwrap();
+        for token in tokens {
+            println!("{:?}", token);
+        }
     }
 }
