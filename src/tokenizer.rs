@@ -76,7 +76,7 @@ fn delim<'i>(delim: Delim) -> impl FnMut(&mut Stream<'i>) -> PResult<TokenTree<'
     }
 }
 
-fn token<'i>(input: &mut Located<&'i str>) -> PResult<Token<'i>> {
+fn token<'i>(input: &mut Stream<'i>) -> PResult<Token<'i>> {
     alt((
         whitespace,
         comment,
@@ -89,40 +89,40 @@ fn token<'i>(input: &mut Located<&'i str>) -> PResult<Token<'i>> {
     .parse_next(input)
 }
 
-fn whitespace<'i>(input: &mut Located<&'i str>) -> PResult<Token<'i>> {
+fn whitespace<'i>(input: &mut Stream<'i>) -> PResult<Token<'i>> {
     take_while(1.., char::is_whitespace)
         .value(Token::Whitespace)
         .parse_next(input)
 }
 
-fn comment<'i>(input: &mut Located<&'i str>) -> PResult<Token<'i>> {
+fn comment<'i>(input: &mut Stream<'i>) -> PResult<Token<'i>> {
     alt((line_comment, block_comment)).parse_next(input)
 }
 
-fn line_comment<'i>(input: &mut Located<&'i str>) -> PResult<Token<'i>> {
+fn line_comment<'i>(input: &mut Stream<'i>) -> PResult<Token<'i>> {
     preceded("//", take_until(0.., "\n"))
         .map(|value: &str| Token::Comment(value.into()))
         .parse_next(input)
 }
 
-fn block_comment<'i>(input: &mut Located<&'i str>) -> PResult<Token<'i>> {
+fn block_comment<'i>(input: &mut Stream<'i>) -> PResult<Token<'i>> {
     delimited("/*", take_until(0.., "*/"), "*/")
         .map(|value: &str| Token::Comment(value.into()))
         .parse_next(input)
 }
 
-fn ident<'i>(input: &mut Located<&'i str>) -> PResult<Token<'i>> {
+fn ident<'i>(input: &mut Stream<'i>) -> PResult<Token<'i>> {
     preceded(peek_ident_start, ident_sequence)
         .map(|value| Token::Ident(value.into()))
         .parse_next(input)
 }
 
-fn ident_sequence<'i>(input: &mut Located<&'i str>) -> PResult<&'i str> {
+fn ident_sequence<'i>(input: &mut Stream<'i>) -> PResult<&'i str> {
     take_while(1.., is_name).parse_next(input)
 }
 
 /// Matches if the next characters would start an identifier.
-fn peek_ident_start<'i>(input: &mut Located<&'i str>) -> PResult<()> {
+fn peek_ident_start<'i>(input: &mut Stream<'i>) -> PResult<()> {
     if would_start_identifier(input.as_ref()) {
         empty.parse_next(input)
     } else {
@@ -130,13 +130,13 @@ fn peek_ident_start<'i>(input: &mut Located<&'i str>) -> PResult<()> {
     }
 }
 
-fn hash<'i>(input: &mut Located<&'i str>) -> PResult<Token<'i>> {
+fn hash<'i>(input: &mut Stream<'i>) -> PResult<Token<'i>> {
     preceded('#', ident_sequence)
         .map(|value: &str| Token::Hash(value.into()))
         .parse_next(input)
 }
 
-fn string<'i>(input: &mut Located<&'i str>) -> PResult<Token<'i>> {
+fn string<'i>(input: &mut Stream<'i>) -> PResult<Token<'i>> {
     let quote = one_of(|c| c == '"' || c == '\'').parse_next(input)?;
     // TODO: Deal with escapes and interpolation
     terminated(take_until(0.., quote), quote)
@@ -144,7 +144,7 @@ fn string<'i>(input: &mut Located<&'i str>) -> PResult<Token<'i>> {
         .parse_next(input)
 }
 
-fn number<'i>(input: &mut Located<&'i str>) -> PResult<Token<'i>> {
+fn number<'i>(input: &mut Stream<'i>) -> PResult<Token<'i>> {
     // Optional sign
     let s = opt_sign.parse_next(input)?;
 
@@ -177,13 +177,13 @@ fn number<'i>(input: &mut Located<&'i str>) -> PResult<Token<'i>> {
 
 /// Parse an optional sign.
 /// Returns -1 for '-', +1 for '+', and +1 otherwise.
-fn opt_sign(input: &mut Located<&str>) -> PResult<i32> {
+fn opt_sign(input: &mut Stream) -> PResult<i32> {
     alt(('+'.value(1), '-'.value(-1), empty.value(1))).parse_next(input)
 }
 
 /// Parses a string of decimal digits.
 /// Returns the digits as an unsigned integer and the number of digits.
-fn dec_digits(input: &mut Located<&str>) -> PResult<(u32, u32)> {
+fn dec_digits(input: &mut Stream) -> PResult<(u32, u32)> {
     take_while(1.., is_digit)
         .map(|digits: &str| (digits.parse().unwrap(), digits.len() as u32))
         .parse_next(input)
