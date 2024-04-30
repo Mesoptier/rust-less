@@ -16,6 +16,9 @@ mod tests {
     #[test]
     fn test_parse() {
         let input = r#"
+            @foo: bar;
+            @bar: 1, 2, 3;
+        
             @foo();
             @bar(1, 2, 3);
         "#;
@@ -24,6 +27,22 @@ mod tests {
             stylesheet,
             ast::Stylesheet {
                 items: vec![
+                    ast::Item::VariableDeclaration {
+                        name: "foo".into(),
+                        value: vec![lexer::TokenTree::Token(lexer::Token::Ident("bar".into()))]
+                    },
+                    ast::Item::VariableDeclaration {
+                        name: "bar".into(),
+                        value: vec![
+                            lexer::TokenTree::Token(lexer::Token::Number(1.0)),
+                            lexer::TokenTree::Token(lexer::Token::Symbol(',')),
+                            lexer::TokenTree::Token(lexer::Token::Whitespace),
+                            lexer::TokenTree::Token(lexer::Token::Number(2.0)),
+                            lexer::TokenTree::Token(lexer::Token::Symbol(',')),
+                            lexer::TokenTree::Token(lexer::Token::Whitespace),
+                            lexer::TokenTree::Token(lexer::Token::Number(3.0)),
+                        ]
+                    },
                     ast::Item::VariableCall {
                         name: "foo".into(),
                         arguments: vec![]

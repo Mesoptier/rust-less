@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use winnow::combinator::{alt, opt, preceded, repeat, terminated};
+use winnow::combinator::{alt, opt, preceded, repeat, repeat_till, terminated};
 use winnow::token::{any, one_of};
 use winnow::{seq, PResult, Parser};
 
@@ -59,14 +59,25 @@ fn item<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
         // item_declaration,
         // item_mixin_rule,
         // item_mixin_call,
-        // item_variable_declaration,
+        item_variable_declaration,
         item_variable_call,
     ))
     .parse_next(input)
 }
 
+fn item_variable_declaration<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
+    seq!(
+        _: symbol('@'),
+        ident,
+        _: (whitespace, symbol(':'), whitespace),
+        repeat_till(0.., any, (whitespace, symbol(';'))),
+    )
+    .map(|(name, (value, _))| Item::VariableDeclaration { name, value })
+    .parse_next(input)
+}
+
 fn item_variable_call<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
-    seq!(_: symbol('@'), ident, block(Delim::Paren), _: (whitespace, opt(symbol(';'))))
+    seq!(_: symbol('@'), ident, block(Delim::Paren), _: (whitespace, symbol(';')))
         .map(|(name, arguments)| Item::VariableCall { name, arguments })
         .parse_next(input)
 }
@@ -77,8 +88,29 @@ mod tests {
     use crate::lexer::tokenize;
 
     #[test]
+    fn test_variable_declaration() {
+        let input = "@foo: bar, baz;";
+        let tokens = tokenize(input).unwrap();
+        let mut input = &tokens[..];
+        let result = item_variable_declaration(&mut input);
+        assert_eq!(
+            result,
+            Ok(Item::VariableDeclaration {
+                name: "foo".into(),
+                value: vec![
+                    TokenTree::Token(Token::Ident("bar".into())),
+                    TokenTree::Token(Token::Symbol(',')),
+                    TokenTree::Token(Token::Whitespace),
+                    TokenTree::Token(Token::Ident("baz".into())),
+                ],
+            })
+        );
+        assert_eq!(input, &[]);
+    }
+
+    #[test]
     fn test_variable_call() {
-        let input = "@foo(bar, baz)";
+        let input = "@foo(bar, baz);";
         let tokens = tokenize(input).unwrap();
         let mut input = &tokens[..];
         let result = item_variable_call(&mut input);
