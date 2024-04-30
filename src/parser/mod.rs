@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use winnow::combinator::{alt, preceded, repeat, repeat_till, terminated};
+use winnow::combinator::{alt, cut_err, eof, preceded, repeat, repeat_till, terminated};
 use winnow::token::{any, one_of};
 use winnow::{seq, PResult, Parser};
 
@@ -36,7 +36,9 @@ fn ident<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Cow<'i, str>> {
     .parse_next(input)
 }
 
-fn block<'i>(delim: Delim) -> impl FnMut(&mut TokenStream<'_, 'i>) -> PResult<Vec<TokenTree<'i>>> {
+fn simple_block<'i>(
+    delim: Delim,
+) -> impl FnMut(&mut TokenStream<'_, 'i>) -> PResult<Vec<TokenTree<'i>>> {
     move |input| {
         any.verify_map(|tt| match tt {
             // TODO: Shouldn't we be cloning the tokens here? I guess winnow is already cloning somewhere?
@@ -47,23 +49,63 @@ fn block<'i>(delim: Delim) -> impl FnMut(&mut TokenStream<'_, 'i>) -> PResult<Ve
     }
 }
 
+fn guarded_block<'i>(
+    input: &mut TokenStream<'_, 'i>,
+) -> PResult<(Option<Vec<TokenTree<'i>>>, Vec<Item<'i>>)> {
+    todo!()
+}
+
+fn component_value<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<TokenTree<'i>> {
+    todo!()
+}
+
 pub fn stylesheet<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Stylesheet<'i>> {
-    preceded(whitespace, repeat(0.., terminated(item, whitespace)))
-        .map(|items| Stylesheet { items })
-        .parse_next(input)
+    preceded(
+        whitespace,
+        repeat_till(0.., cut_err(terminated(item, whitespace)), eof),
+    )
+    .map(|(items, _)| Stylesheet { items })
+    .parse_next(input)
 }
 
 fn item<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
     alt((
-        // item_at_rule,
-        // item_qualified_rule,
-        // item_declaration,
-        // item_mixin_rule,
-        // item_mixin_call,
         item_variable_declaration,
         item_variable_call,
+        // item_at_rule,
+        item_mixin_rule,
+        item_qualified_rule,
+        // item_declaration,
+        // item_mixin_call,
     ))
     .parse_next(input)
+}
+
+fn item_mixin_rule<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
+    seq!(
+        _: symbol('.'),
+        ident,
+        simple_block(Delim::Paren),
+        _: whitespace,
+        guarded_block,
+    )
+    .map(|(name, arguments, (guard, block))| Item::MixinRule {
+        name,
+        arguments,
+        guard,
+        block,
+    })
+    .parse_next(input)
+}
+
+fn item_qualified_rule<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
+    repeat_till(1.., component_value, guarded_block)
+        .map(|(selectors, (guard, block))| Item::QualifiedRule {
+            selectors,
+            guard,
+            block,
+        })
+        .parse_next(input)
 }
 
 fn item_variable_declaration<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
@@ -78,7 +120,7 @@ fn item_variable_declaration<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Ite
 }
 
 fn item_variable_call<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
-    seq!(_: symbol('@'), ident, block(Delim::Paren), _: (whitespace, symbol(';')))
+    seq!(_: symbol('@'), ident, simple_block(Delim::Paren), _: (whitespace, symbol(';')))
         .map(|(name, arguments)| Item::VariableCall { name, arguments })
         .parse_next(input)
 }
