@@ -57,7 +57,7 @@ pub enum TokenTree<'i> {
     Delim(Delim, TokenStream<'i>),
 }
 
-pub fn tokenize(input: &str) -> Result<TokenStream, String> {
+pub fn tokenize<'i>(input: &'i str) -> Result<TokenStream<'i>, String> {
     repeat(0.., token_tree)
         .parse(Stream::new(input))
         .map_err(|e| e.to_string())
@@ -308,15 +308,5 @@ mod tests {
 
         let input = r#""This is a string"#;
         assert!(tokenize(input).is_err());
-    }
-
-    #[test]
-    fn print_file() {
-        let path = std::path::Path::new("node_modules/@less/test-data/less/_main/calc.less");
-        let file = std::fs::read_to_string(path).unwrap();
-        let tokens = tokenize(&file).unwrap();
-        for token in tokens {
-            println!("{:?}", token);
-        }
     }
 }
