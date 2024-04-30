@@ -1,5 +1,6 @@
 use std::borrow::Cow;
-use winnow::combinator::{alt, opt, preceded, repeat, repeat_till, terminated};
+
+use winnow::combinator::{alt, preceded, repeat, repeat_till, terminated};
 use winnow::token::{any, one_of};
 use winnow::{seq, PResult, Parser};
 
@@ -84,8 +85,9 @@ fn item_variable_call<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::lexer::tokenize;
+
+    use super::*;
 
     #[test]
     fn test_variable_declaration() {
