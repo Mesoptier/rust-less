@@ -2,11 +2,13 @@ use std::borrow::Cow;
 
 use crate::lexer::TokenTree;
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct Stylesheet<'i> {
     pub items: Vec<Item<'i>>,
 }
 
 // TODO: Many of these fields can be parsed into more specific types.
+#[derive(Clone, Debug, PartialEq)]
 pub enum Item<'i> {
     /// Regular CSS at-rule.
     AtRule {
@@ -22,7 +24,7 @@ pub enum Item<'i> {
     },
     /// Regular CSS declaration.
     Declaration {
-        name: Cow<'i, str>,
+        name: Vec<TokenTree<'i>>,
         value: Vec<TokenTree<'i>>,
         important: bool,
     },
