@@ -39,6 +39,7 @@ impl Delim {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token<'i> {
+    // TODO: Merge whitespace and comments into a single token?
     Whitespace,
     Comment(Cow<'i, str>),
     Ident(Cow<'i, str>),
