@@ -6,7 +6,9 @@ use winnow::stream::AsChar;
 use winnow::token::{any, one_of, take_until, take_while};
 use winnow::{dispatch, seq, Located, PResult, Parser};
 
-use crate::lexer::helpers::{is_digit, is_name, would_start_identifier};
+use crate::tokenize::helpers::{is_digit, is_name, would_start_identifier};
+
+mod helpers;
 
 type Stream<'i> = Located<&'i str>;
 
@@ -46,7 +48,7 @@ pub enum Token<'i> {
     Symbol(char),
 }
 
-pub type TokenStream<'i> = Vec<TokenTree<'i>>;
+type TokenStream<'i> = Vec<TokenTree<'i>>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TokenTree<'i> {

@@ -1,16 +1,16 @@
 /// https://www.w3.org/TR/css-syntax-3/#digit
 pub fn is_digit(c: char) -> bool {
-    nom::character::is_digit(c as u8)
+    c.is_ascii_digit()
 }
 
 /// https://www.w3.org/TR/css-syntax-3/#hex-digit
 pub fn is_hex_digit(c: char) -> bool {
-    nom::character::is_hex_digit(c as u8)
+    c.is_ascii_hexdigit()
 }
 
 /// https://www.w3.org/TR/css-syntax-3/#letter
 pub fn is_letter(c: char) -> bool {
-    nom::character::is_alphabetic(c as u8)
+    c.is_ascii_alphabetic()
 }
 
 /// https://www.w3.org/TR/css-syntax-3/#non-ascii-code-point
