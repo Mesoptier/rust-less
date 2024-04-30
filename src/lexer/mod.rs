@@ -6,7 +6,7 @@ use winnow::stream::AsChar;
 use winnow::token::{any, one_of, take_until, take_while};
 use winnow::{dispatch, seq, Located, PResult, Parser};
 
-use crate::tokenize::helpers::{is_digit, is_name, would_start_identifier};
+use crate::lexer::helpers::{is_digit, is_name, would_start_identifier};
 
 mod helpers;
 
