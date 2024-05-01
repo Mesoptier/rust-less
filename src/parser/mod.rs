@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 use winnow::combinator::{alt, cut_err, eof, opt, preceded, repeat, repeat_till, terminated};
+use winnow::error::StrContext;
 use winnow::token::{any, one_of};
 use winnow::{seq, PResult, Parser};
 
@@ -86,13 +87,13 @@ pub fn stylesheet<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Stylesheet<'i>
 
 fn item<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
     alt((
-        item_variable_declaration,
-        item_variable_call,
-        item_at_rule,
-        item_mixin_rule,
-        item_qualified_rule,
-        item_declaration,
-        // item_mixin_call,
+        item_variable_declaration.context(StrContext::Label("item_variable_declaration")),
+        item_variable_call.context(StrContext::Label("item_variable_call")),
+        item_at_rule.context(StrContext::Label("item_at_rule")),
+        item_mixin_rule.context(StrContext::Label("item_mixin_rule")),
+        item_qualified_rule.context(StrContext::Label("item_qualified_rule")),
+        item_declaration.context(StrContext::Label("item_declaration")),
+        item_mixin_call.context(StrContext::Label("item_mixin_call")),
     ))
     .parse_next(input)
 }
@@ -199,6 +200,10 @@ fn item_variable_call<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> 
     seq!(_: symbol('@'), ident, simple_block(Delim::Paren), _: (whitespace, symbol(';')))
         .map(|(name, arguments)| Item::VariableCall { name, arguments })
         .parse_next(input)
+}
+
+fn item_mixin_call<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
+    todo!()
 }
 
 #[cfg(test)]
