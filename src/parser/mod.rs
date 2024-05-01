@@ -10,13 +10,14 @@ use crate::ref_stream::RefStream;
 
 type TokenStream<'t, 'i> = RefStream<'t, TokenTree<'i>>;
 
-/// Consume any whitespace or comments.
+fn whitespace_or_comment<'t, 'i>(input: &mut TokenStream<'t, 'i>) -> PResult<&'t TokenTree<'i>> {
+    one_of(|tt| matches!(tt, &TokenTree::Token(Token::Whitespace | Token::Comment(_))))
+        .parse_next(input)
+}
+
+/// Consume any number of whitespace or comments.
 fn whitespace(input: &mut TokenStream) -> PResult<()> {
-    repeat(
-        0..,
-        one_of(|tt| matches!(tt, &TokenTree::Token(Token::Whitespace | Token::Comment(_)))),
-    )
-    .parse_next(input)
+    repeat(0.., whitespace_or_comment).parse_next(input)
 }
 
 fn symbol<'i>(c: char) -> impl FnMut(&mut TokenStream<'_, 'i>) -> PResult<()> {
