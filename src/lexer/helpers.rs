@@ -3,11 +3,6 @@ pub fn is_digit(c: char) -> bool {
     c.is_ascii_digit()
 }
 
-/// https://www.w3.org/TR/css-syntax-3/#hex-digit
-pub fn is_hex_digit(c: char) -> bool {
-    c.is_ascii_hexdigit()
-}
-
 /// https://www.w3.org/TR/css-syntax-3/#letter
 pub fn is_letter(c: char) -> bool {
     c.is_ascii_alphabetic()
