@@ -6,14 +6,15 @@ use winnow::{seq, PResult, Parser};
 
 use crate::ast::{Item, Stylesheet};
 use crate::lexer::{Delim, Token, TokenTree};
+use crate::ref_stream::RefStream;
 
-type TokenStream<'t, 'i> = &'t [TokenTree<'i>];
+type TokenStream<'t, 'i> = RefStream<'t, TokenTree<'i>>;
 
 /// Consume any whitespace or comments.
 fn whitespace(input: &mut TokenStream) -> PResult<()> {
     repeat(
         0..,
-        one_of(|tt| matches!(tt, TokenTree::Token(Token::Whitespace | Token::Comment(_)))),
+        one_of(|tt| matches!(tt, &TokenTree::Token(Token::Whitespace | Token::Comment(_)))),
     )
     .parse_next(input)
 }
@@ -21,7 +22,7 @@ fn whitespace(input: &mut TokenStream) -> PResult<()> {
 fn symbol<'i>(c: char) -> impl FnMut(&mut TokenStream<'_, 'i>) -> PResult<()> {
     move |input| {
         any.verify_map(|tt| match tt {
-            TokenTree::Token(Token::Symbol(s)) if s == c => Some(()),
+            &TokenTree::Token(Token::Symbol(s)) if s == c => Some(()),
             _ => None,
         })
         .parse_next(input)
@@ -29,8 +30,8 @@ fn symbol<'i>(c: char) -> impl FnMut(&mut TokenStream<'_, 'i>) -> PResult<()> {
 }
 
 fn ident<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Cow<'i, str>> {
-    any.verify_map(|tt| match tt {
-        TokenTree::Token(Token::Ident(ident)) => Some(ident),
+    any.verify_map(|tt: &'_ TokenTree<'i>| match tt {
+        TokenTree::Token(Token::Ident(ident)) => Some(ident.clone()),
         _ => None,
     })
     .parse_next(input)
@@ -40,9 +41,8 @@ fn simple_block<'i>(
     delim: Delim,
 ) -> impl FnMut(&mut TokenStream<'_, 'i>) -> PResult<Vec<TokenTree<'i>>> {
     move |input| {
-        any.verify_map(|tt| match tt {
-            // TODO: Shouldn't we be cloning the tokens here? I guess winnow is already cloning somewhere?
-            TokenTree::Delim(d, tokens) if d == delim => Some(tokens),
+        any.verify_map(|tt: &'_ TokenTree<'i>| match tt {
+            TokenTree::Delim(d, tokens) if *d == delim => Some(tokens.clone()),
             _ => None,
         })
         .parse_next(input)
@@ -70,7 +70,7 @@ fn guarded_block<'i>(
     .parse_next(input)
 }
 
-fn component_value<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<TokenTree<'i>> {
+fn component_value<'t, 'i>(input: &mut TokenStream<'t, 'i>) -> PResult<&'t TokenTree<'i>> {
     any.parse_next(input)
 }
 
@@ -114,7 +114,7 @@ fn item_mixin_rule<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
 }
 
 fn item_qualified_rule<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
-    repeat_till(1.., component_value, guarded_block)
+    repeat_till(1.., component_value.map(Clone::clone), guarded_block)
         .map(|(selectors, (guard, block))| Item::QualifiedRule {
             selectors,
             guard,
@@ -128,7 +128,7 @@ fn item_variable_declaration<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Ite
         _: symbol('@'),
         ident,
         _: (whitespace, symbol(':'), whitespace),
-        repeat_till(0.., any, (whitespace, symbol(';'))),
+        repeat_till(0.., any.map(Clone::clone), (whitespace, symbol(';'))),
     )
     .map(|(name, (value, _))| Item::VariableDeclaration { name, value })
     .parse_next(input)
@@ -146,15 +146,21 @@ mod tests {
 
     use super::*;
 
+    macro_rules! assert_parse_ok {
+        ($input:expr, $expected:expr) => {
+            let tokens = tokenize($input).unwrap();
+            let mut input = RefStream::new(&tokens);
+            let result = item(&mut input);
+            assert_eq!(result, Ok($expected));
+            assert_eq!(input.into_inner(), &[]);
+        };
+    }
+
     #[test]
     fn test_variable_declaration() {
-        let input = "@foo: bar, baz;";
-        let tokens = tokenize(input).unwrap();
-        let mut input = &tokens[..];
-        let result = item_variable_declaration(&mut input);
-        assert_eq!(
-            result,
-            Ok(Item::VariableDeclaration {
+        assert_parse_ok!(
+            "@foo: bar, baz;",
+            Item::VariableDeclaration {
                 name: "foo".into(),
                 value: vec![
                     TokenTree::Token(Token::Ident("bar".into())),
@@ -162,20 +168,15 @@ mod tests {
                     TokenTree::Token(Token::Whitespace),
                     TokenTree::Token(Token::Ident("baz".into())),
                 ],
-            })
+            }
         );
-        assert_eq!(input, &[]);
     }
 
     #[test]
     fn test_variable_call() {
-        let input = "@foo(bar, baz);";
-        let tokens = tokenize(input).unwrap();
-        let mut input = &tokens[..];
-        let result = item_variable_call(&mut input);
-        assert_eq!(
-            result,
-            Ok(Item::VariableCall {
+        assert_parse_ok!(
+            "@foo(bar, baz);",
+            Item::VariableCall {
                 name: "foo".into(),
                 arguments: vec![
                     TokenTree::Token(Token::Ident("bar".into())),
@@ -183,20 +184,15 @@ mod tests {
                     TokenTree::Token(Token::Whitespace),
                     TokenTree::Token(Token::Ident("baz".into())),
                 ],
-            })
+            }
         );
-        assert_eq!(input, &[]);
     }
 
     #[test]
     fn test_mixin_rule() {
-        let input = ".foo(bar, baz) { }";
-        let tokens = tokenize(input).unwrap();
-        let mut input = &tokens[..];
-        let result = item_mixin_rule(&mut input);
-        assert_eq!(
-            result,
-            Ok(Item::MixinRule {
+        assert_parse_ok!(
+            ".foo(bar, baz) { }",
+            Item::MixinRule {
                 name: "foo".into(),
                 arguments: vec![
                     TokenTree::Token(Token::Ident("bar".into())),
@@ -205,18 +201,13 @@ mod tests {
                     TokenTree::Token(Token::Ident("baz".into())),
                 ],
                 guard: None,
-                block: vec![TokenTree::Token(Token::Whitespace),],
-            })
+                block: vec![TokenTree::Token(Token::Whitespace)],
+            }
         );
-        assert_eq!(input, &[]);
 
-        let input = ".foo(bar, baz) when (true) { }";
-        let tokens = tokenize(input).unwrap();
-        let mut input = &tokens[..];
-        let result = item_mixin_rule(&mut input);
-        assert_eq!(
-            result,
-            Ok(Item::MixinRule {
+        assert_parse_ok!(
+            ".foo(bar, baz) when (true) { }",
+            Item::MixinRule {
                 name: "foo".into(),
                 arguments: vec![
                     TokenTree::Token(Token::Ident("bar".into())),
@@ -225,26 +216,20 @@ mod tests {
                     TokenTree::Token(Token::Ident("baz".into())),
                 ],
                 guard: Some(vec![TokenTree::Token(Token::Ident("true".into()))]),
-                block: vec![TokenTree::Token(Token::Whitespace),],
-            })
+                block: vec![TokenTree::Token(Token::Whitespace)],
+            }
         );
-        assert_eq!(input, &[]);
     }
 
     #[test]
     fn test_qualified_rule() {
-        let input = "foo { }";
-        let tokens = tokenize(input).unwrap();
-        let mut input = &tokens[..];
-        let result = item_qualified_rule(&mut input);
-        assert_eq!(
-            result,
-            Ok(Item::QualifiedRule {
+        assert_parse_ok!(
+            "foo { }",
+            Item::QualifiedRule {
                 selectors: vec![TokenTree::Token(Token::Ident("foo".into()))],
                 guard: None,
-                block: vec![TokenTree::Token(Token::Whitespace),],
-            })
+                block: vec![TokenTree::Token(Token::Whitespace)],
+            }
         );
-        assert_eq!(input, &[]);
     }
 }
