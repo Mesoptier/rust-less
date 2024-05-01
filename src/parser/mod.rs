@@ -352,4 +352,37 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn test_mixin_call() {
+        assert_parse_ok!(
+            ".foo(bar, baz);",
+            Item::MixinCall {
+                selector: vec![TokenTree::Token(Token::Ident("foo".into()))],
+                arguments: vec![
+                    TokenTree::Token(Token::Ident("bar".into())),
+                    TokenTree::Token(Token::Symbol(',')),
+                    TokenTree::Token(Token::Whitespace),
+                    TokenTree::Token(Token::Ident("baz".into())),
+                ],
+            }
+        );
+
+        assert_parse_ok!(
+            "#namespace.foo(bar, baz)",
+            Item::MixinCall {
+                selector: vec![
+                    TokenTree::Token(Token::Hash("namespace".into())),
+                    TokenTree::Token(Token::Symbol('.')),
+                    TokenTree::Token(Token::Ident("foo".into())),
+                ],
+                arguments: vec![
+                    TokenTree::Token(Token::Ident("bar".into())),
+                    TokenTree::Token(Token::Symbol(',')),
+                    TokenTree::Token(Token::Whitespace),
+                    TokenTree::Token(Token::Ident("baz".into())),
+                ],
+            }
+        );
+    }
 }
