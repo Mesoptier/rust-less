@@ -88,12 +88,30 @@ fn item<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
     alt((
         item_variable_declaration,
         item_variable_call,
-        // item_at_rule,
+        item_at_rule,
         item_mixin_rule,
         item_qualified_rule,
         // item_declaration,
         // item_mixin_call,
     ))
+    .parse_next(input)
+}
+
+fn item_at_rule<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
+    seq!(
+        _: symbol('@'),
+        ident,
+        repeat_till(0.., any.map(Clone::clone), preceded(whitespace, alt((
+            eof.value(None),
+            symbol(';').value(None),
+            simple_block(Delim::Brace).map(Some),
+        )))),
+    )
+    .map(|(name, (prelude, block))| Item::AtRule {
+        name,
+        prelude,
+        block,
+    })
     .parse_next(input)
 }
 
@@ -230,6 +248,39 @@ mod tests {
                 selectors: vec![TokenTree::Token(Token::Ident("foo".into()))],
                 guard: None,
                 block: vec![TokenTree::Token(Token::Whitespace)],
+            }
+        );
+    }
+
+    #[test]
+    fn test_at_rule() {
+        assert_parse_ok!(
+            "@foo;",
+            Item::AtRule {
+                name: "foo".into(),
+                prelude: vec![],
+                block: None,
+            }
+        );
+
+        assert_parse_ok!(
+            "@foo bar;",
+            Item::AtRule {
+                name: "foo".into(),
+                prelude: vec![
+                    TokenTree::Token(Token::Whitespace),
+                    TokenTree::Token(Token::Ident("bar".into()))
+                ],
+                block: None,
+            }
+        );
+
+        assert_parse_ok!(
+            "@foo { }",
+            Item::AtRule {
+                name: "foo".into(),
+                prelude: vec![],
+                block: Some(vec![TokenTree::Token(Token::Whitespace)]),
             }
         );
     }
