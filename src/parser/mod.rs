@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use winnow::combinator::{alt, cut_err, eof, preceded, repeat, repeat_till, terminated};
+use winnow::combinator::{alt, cut_err, eof, opt, preceded, repeat, repeat_till, terminated};
 use winnow::token::{any, one_of};
 use winnow::{seq, PResult, Parser};
 
@@ -51,12 +51,27 @@ fn simple_block<'i>(
 
 fn guarded_block<'i>(
     input: &mut TokenStream<'_, 'i>,
-) -> PResult<(Option<Vec<TokenTree<'i>>>, Vec<Item<'i>>)> {
-    todo!()
+) -> PResult<(Option<Vec<TokenTree<'i>>>, Vec<TokenTree<'i>>)> {
+    seq!(
+        // Guard
+        opt(preceded(
+            (
+                whitespace,
+                any.verify(
+                    |tt| matches!(tt, TokenTree::Token(Token::Ident(ident)) if ident == "when")
+                ),
+                whitespace,
+            ),
+            cut_err(simple_block(Delim::Paren)),
+        )),
+        // Block
+        cut_err(preceded(whitespace, simple_block(Delim::Brace))),
+    )
+    .parse_next(input)
 }
 
 fn component_value<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<TokenTree<'i>> {
-    todo!()
+    any.parse_next(input)
 }
 
 pub fn stylesheet<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Stylesheet<'i>> {
@@ -168,6 +183,66 @@ mod tests {
                     TokenTree::Token(Token::Whitespace),
                     TokenTree::Token(Token::Ident("baz".into())),
                 ],
+            })
+        );
+        assert_eq!(input, &[]);
+    }
+
+    #[test]
+    fn test_mixin_rule() {
+        let input = ".foo(bar, baz) { }";
+        let tokens = tokenize(input).unwrap();
+        let mut input = &tokens[..];
+        let result = item_mixin_rule(&mut input);
+        assert_eq!(
+            result,
+            Ok(Item::MixinRule {
+                name: "foo".into(),
+                arguments: vec![
+                    TokenTree::Token(Token::Ident("bar".into())),
+                    TokenTree::Token(Token::Symbol(',')),
+                    TokenTree::Token(Token::Whitespace),
+                    TokenTree::Token(Token::Ident("baz".into())),
+                ],
+                guard: None,
+                block: vec![TokenTree::Token(Token::Whitespace),],
+            })
+        );
+        assert_eq!(input, &[]);
+
+        let input = ".foo(bar, baz) when (true) { }";
+        let tokens = tokenize(input).unwrap();
+        let mut input = &tokens[..];
+        let result = item_mixin_rule(&mut input);
+        assert_eq!(
+            result,
+            Ok(Item::MixinRule {
+                name: "foo".into(),
+                arguments: vec![
+                    TokenTree::Token(Token::Ident("bar".into())),
+                    TokenTree::Token(Token::Symbol(',')),
+                    TokenTree::Token(Token::Whitespace),
+                    TokenTree::Token(Token::Ident("baz".into())),
+                ],
+                guard: Some(vec![TokenTree::Token(Token::Ident("true".into()))]),
+                block: vec![TokenTree::Token(Token::Whitespace),],
+            })
+        );
+        assert_eq!(input, &[]);
+    }
+
+    #[test]
+    fn test_qualified_rule() {
+        let input = "foo { }";
+        let tokens = tokenize(input).unwrap();
+        let mut input = &tokens[..];
+        let result = item_qualified_rule(&mut input);
+        assert_eq!(
+            result,
+            Ok(Item::QualifiedRule {
+                selectors: vec![TokenTree::Token(Token::Ident("foo".into()))],
+                guard: None,
+                block: vec![TokenTree::Token(Token::Whitespace),],
             })
         );
         assert_eq!(input, &[]);

@@ -14,13 +14,13 @@ pub enum Item<'i> {
     AtRule {
         name: Cow<'i, str>,
         prelude: Vec<TokenTree<'i>>,
-        block: Option<Vec<Item<'i>>>,
+        block: Option<Vec<TokenTree<'i>>>,
     },
     /// Regular CSS qualified rule.
     QualifiedRule {
         selectors: Vec<TokenTree<'i>>,
         guard: Option<Vec<TokenTree<'i>>>,
-        block: Vec<Item<'i>>,
+        block: Vec<TokenTree<'i>>,
     },
     /// Regular CSS declaration.
     Declaration {
@@ -33,7 +33,7 @@ pub enum Item<'i> {
         name: Cow<'i, str>,
         arguments: Vec<TokenTree<'i>>,
         guard: Option<Vec<TokenTree<'i>>>,
-        block: Vec<Item<'i>>,
+        block: Vec<TokenTree<'i>>,
     },
     /// LESS mixin call.
     MixinCall {
