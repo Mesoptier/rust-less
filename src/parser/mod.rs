@@ -66,7 +66,7 @@ fn guarded_block<'i>(
             cut_err(simple_block(Delim::Paren)),
         )),
         // Block
-        cut_err(preceded(whitespace, simple_block(Delim::Brace))),
+        preceded(whitespace, simple_block(Delim::Brace)),
     )
     .parse_next(input)
 }
@@ -91,7 +91,7 @@ fn item<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
         item_at_rule,
         item_mixin_rule,
         item_qualified_rule,
-        // item_declaration,
+        item_declaration,
         // item_mixin_call,
     ))
     .parse_next(input)
@@ -140,6 +140,48 @@ fn item_qualified_rule<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>>
             block,
         })
         .parse_next(input)
+}
+
+// TODO: https://drafts.csswg.org/css-syntax/#consume-declaration
+fn item_declaration<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
+    seq!(
+        repeat_till(
+            1..,
+            component_value.map(Clone::clone),
+            (whitespace, symbol(':'), whitespace)
+        ),
+        repeat_till(
+            1..,
+            component_value.map(Clone::clone),
+            (whitespace, alt((symbol(';'), eof.void())))
+        ),
+    )
+    .map(|((name, _), (value, _))| {
+        let mut value: Vec<TokenTree> = value;
+        let mut important = false;
+
+        // Parse `!important` flag.
+        if value.ends_with(&[
+            TokenTree::Token(Token::Symbol('!')),
+            TokenTree::Token(Token::Ident("important".into())),
+        ]) {
+            important = true;
+            value.pop();
+            value.pop();
+        }
+
+        // Remove trailing whitespace or comments.
+        while let Some(TokenTree::Token(Token::Whitespace | Token::Comment(_))) = value.last() {
+            value.pop();
+        }
+
+        Item::Declaration {
+            name,
+            value,
+            important,
+        }
+    })
+    .parse_next(input)
 }
 
 fn item_variable_declaration<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
@@ -281,6 +323,27 @@ mod tests {
                 name: "foo".into(),
                 prelude: vec![],
                 block: Some(vec![TokenTree::Token(Token::Whitespace)]),
+            }
+        );
+    }
+
+    #[test]
+    fn test_declaration() {
+        assert_parse_ok!(
+            "foo: bar;",
+            Item::Declaration {
+                name: vec![TokenTree::Token(Token::Ident("foo".into()))],
+                value: vec![TokenTree::Token(Token::Ident("bar".into()))],
+                important: false,
+            }
+        );
+
+        assert_parse_ok!(
+            "foo: bar !important;",
+            Item::Declaration {
+                name: vec![TokenTree::Token(Token::Ident("foo".into()))],
+                value: vec![TokenTree::Token(Token::Ident("bar".into()))],
+                important: true,
             }
         );
     }
