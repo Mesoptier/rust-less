@@ -16,6 +16,10 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
 > + Clone {
     let whitespace_or_comment = select_ref!(TokenTree::Token(Token::Whitespace) | TokenTree::Token(Token::Comment(_)) => ());
     let junk = whitespace_or_comment.repeated().ignored();
+    let symbol =
+        |symbol: char| select_ref!(TokenTree::Token(Token::Symbol(s)) if s == &symbol => ());
+    let ident = select_ref!(TokenTree::Token(Token::Ident(ident)) => *ident);
+    let at_ident = symbol('@').ignore_then(ident);
 
     // Item parsers
     let list_of_items = recursive(|list_of_items| {
@@ -33,20 +37,12 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
         // Parse a variable declaration
         let item_variable_declaration = {
             group((
-                select_ref!(TokenTree::Token(Token::Symbol('@')) => ()),
-                select_ref!(TokenTree::Token(Token::Ident(ident)) => *ident),
-                junk.or_not(),
-                select_ref!(TokenTree::Token(Token::Symbol(':')) => ()),
-                any()
-                    .and_is(select_ref!(TokenTree::Token(Token::Symbol(';')) => ()).not())
-                    .repeated()
-                    .to_slice(),
-                choice((
-                    select_ref!(TokenTree::Token(Token::Symbol(';')) => ()),
-                    end(),
-                )),
+                at_ident.then_ignore(junk.or_not()).then_ignore(symbol(':')),
+                // Parse component values up to a semicolon or eof
+                any().and_is(symbol(';').not()).repeated().to_slice(),
+                choice((symbol(';'), end())),
             ))
-            .map(|(_, name, _, _, value, _)| Item::VariableDeclaration { name, value })
+            .map(|(name, value, _)| Item::VariableDeclaration { name, value })
         };
 
         // let item_variable_call = todo();
@@ -57,20 +53,18 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
                 TokenTree::Token(Token::Symbol(';')) => (),
                 TokenTree::Tree(delim, _) if delim == &Delim::Brace => ()
             );
-            let item_at_rule_opt_block = choice((
-                end().to(None),
-                just(TokenTree::Token(Token::Symbol(';'))).to(None),
-                rule_block.map(Some),
-            ));
             group((
-                select_ref!(TokenTree::Token(Token::Symbol('@')) => ()),
-                select_ref!(TokenTree::Token(Token::Ident(ident)) => ident),
+                at_ident,
                 // Parse the prelude up to eof, semicolon, or block
                 any().and_is(item_at_rule_end.not()).repeated().to_slice(),
                 // Parse the optional block
-                item_at_rule_opt_block,
+                choice((
+                    end().to(None),
+                    symbol(';').to(None),
+                    rule_block.clone().map(Some),
+                )),
             ))
-            .map(|(_, name, prelude, block)| Item::AtRule {
+            .map(|(name, prelude, block)| Item::AtRule {
                 name,
                 prelude,
                 block,
