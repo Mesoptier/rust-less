@@ -1,7 +1,7 @@
 use chumsky::prelude::*;
 use std::borrow::Cow;
 
-use crate::lexer::helpers::{is_digit, is_name, would_start_identifier};
+use crate::lexer::helpers::{is_name, would_start_identifier};
 
 mod helpers;
 
@@ -84,13 +84,8 @@ fn line_comment<'src>() -> impl Parser<'src, &'src str, Token<'src>, Err<'src>> 
 
 fn block_comment<'src>() -> impl Parser<'src, &'src str, Token<'src>, Err<'src>> + Clone {
     just("/*")
-        .ignore_then(
-            any()
-                .and_is(just("*/").not())
-                .repeated()
-                .to_slice()
-                .then_ignore(just("*/").repeated().at_least(0).at_most(1)),
-        )
+        .ignore_then(any().and_is(just("*/").not()).repeated().to_slice())
+        .then_ignore(choice((just("*/").ignored(), end())))
         .map(|value: &str| Token::Comment(value.into()))
 }
 
@@ -132,42 +127,41 @@ fn string_with_quote<'src>(
 ) -> impl Parser<'src, &'src str, Token<'src>, Err<'src>> + Clone {
     // TODO: Deal with escapes and interpolation
     just(quote)
-        .ignore_then(none_of([quote]))
+        .ignore_then(any().and_is(just(quote).not()).repeated().to_slice())
         .then_ignore(just(quote))
-        .to_slice()
         .map(|value: &str| Token::String(value.into()))
 }
 
 fn number<'src>() -> impl Parser<'src, &'src str, Token<'src>, Err<'src>> + Clone {
-    todo()
-    // // Optional sign
-    // let s = opt_sign.parse_next(input)?;
-    //
-    // // Integer and fractional parts
-    // let (i, f, d) = alt((
-    //     // Integer part + optional fractional part
-    //     seq!(dec_digits, opt(preceded('.', dec_digits))).map(|o| match o {
-    //         ((i, _), Some((f, d))) => (i, f, d),
-    //         ((i, _), None) => (i, 0, 0),
-    //     }),
-    //     // No integer part + required fractional part
-    //     preceded('.', dec_digits).map(|(f, d)| (0, f, d)),
-    // ))
-    // .parse_next(input)?;
-    //
-    // // Exponent sign and exponent
-    // let (t, e) = opt(preceded(Caseless("e"), seq!(opt_sign, dec_digits)))
-    //     .map(|o| match o {
-    //         Some((t, (e, _))) => (t, e),
-    //         None => (1, 0),
-    //     })
-    //     .parse_next(input)?;
-    //
-    // // See https://www.w3.org/TR/css-syntax-3/#convert-string-to-number
-    // let number =
-    //     s as f32 * (i as f32 + f as f32 * 10f32.powi(-(d as i32))) * 10f32.powi(t * e as i32);
-    //
-    // Ok(Token::Number(number))
+    group((
+        // Optional sign
+        opt_sign(),
+        // Integer and fractional parts
+        choice((
+            // Integer part + optional fractional part
+            group((dec_digits(), just('.').ignore_then(dec_digits()).or_not())).map(|o| match o {
+                ((i, _), Some((f, d))) => (i, f, d),
+                ((i, _), None) => (i, 0, 0),
+            }),
+            // No integer part + required fractional part
+            just('.').ignore_then(dec_digits()).map(|(f, d)| (0, f, d)),
+        )),
+        // Exponent sign and exponent
+        one_of("eE")
+            .ignore_then(opt_sign().then(dec_digits()))
+            .or_not()
+            .map(|o| match o {
+                Some((t, (e, _))) => (t, e),
+                None => (1, 0),
+            }),
+    ))
+    .map(|(s, (i, f, d), (t, e))| {
+        // See https://www.w3.org/TR/css-syntax-3/#convert-string-to-number
+        let number =
+            s as f32 * (i as f32 + f as f32 * 10f32.powi(-(d as i32))) * 10f32.powi(t * e as i32);
+
+        Token::Number(number)
+    })
 }
 
 /// Parse an optional sign.
@@ -188,17 +182,6 @@ fn dec_digits<'src>() -> impl Parser<'src, &'src str, (u32, u32), Err<'src>> + C
 mod tests {
     use super::*;
 
-    macro_rules! token {
-        ($($tt:tt)*) => {
-            TokenTree::Token(Token::$($tt)*)
-        };
-    }
-    macro_rules! tree {
-        ($delim:ident, [$($tokens:tt)*]) => {
-            TokenTree::Tree(Delim::$delim, vec![$($tokens)*])
-        };
-    }
-
     #[test]
     fn test_line_comment() {
         let input = "// This is a comment\n";
@@ -207,18 +190,88 @@ mod tests {
 
         let input = "// This is a comment";
         let expected = Ok(Token::Comment(" This is a comment".into()));
-        assert_eq!(line_comment().lazy().parse(input).into_result(), expected);
+        assert_eq!(line_comment().parse(input).into_result(), expected);
     }
 
     #[test]
     fn test_block_comment() {
         let input = "/* This is a comment */";
         let expected = Ok(Token::Comment(" This is a comment ".into()));
-        assert_eq!(block_comment().lazy().parse(input).into_result(), expected);
+        assert_eq!(block_comment().parse(input).into_result(), expected);
 
         let input = "/* This is a comment";
         let expected = Ok(Token::Comment(" This is a comment".into()));
-        assert_eq!(block_comment().lazy().parse(input).into_result(), expected);
+        assert_eq!(block_comment().parse(input).into_result(), expected);
+    }
+
+    #[test]
+    fn test_ident() {
+        let input = "ident";
+        let expected = Ok(Token::Ident("ident".into()));
+        assert_eq!(ident().parse(input).into_result(), expected);
+
+        let input = "ident-with-dash";
+        let expected = Ok(Token::Ident("ident-with-dash".into()));
+        assert_eq!(ident().parse(input).into_result(), expected);
+
+        let input = "ident_with_underscore";
+        let expected = Ok(Token::Ident("ident_with_underscore".into()));
+        assert_eq!(ident().parse(input).into_result(), expected);
+
+        let input = "--ident";
+        let expected = Ok(Token::Ident("--ident".into()));
+        assert_eq!(ident().parse(input).into_result(), expected);
+
+        let input = "--0ident";
+        let expected = Ok(Token::Ident("--0ident".into()));
+        assert_eq!(ident().parse(input).into_result(), expected);
+
+        let input = "-ident";
+        let expected = Ok(Token::Ident("-ident".into()));
+        assert_eq!(ident().parse(input).into_result(), expected);
+
+        let input = "-0ident";
+        assert!(ident().parse(input).has_errors());
+    }
+
+    #[test]
+    fn test_hash() {
+        let input = "#hash";
+        let expected = Ok(Token::Hash("hash".into()));
+        assert_eq!(hash().parse(input).into_result(), expected);
+
+        let input = "#0ff";
+        let expected = Ok(Token::Hash("0ff".into()));
+        assert_eq!(hash().parse(input).into_result(), expected);
+    }
+
+    #[test]
+    fn test_string() {
+        let input = r#""This is a string""#;
+        let expected = Ok(Token::String("This is a string".into()));
+        assert_eq!(string().parse(input).into_result(), expected);
+
+        let input = r#"'This is a string'"#;
+        let expected = Ok(Token::String("This is a string".into()));
+        assert_eq!(string().parse(input).into_result(), expected);
+
+        let input = r#""This is a string"#;
+        assert!(string().parse(input).has_errors());
+    }
+
+    #[test]
+    fn test_number() {
+        let input = "123.45";
+        let expected = Ok(Token::Number(123.45));
+        assert_eq!(number().parse(input).into_result(), expected);
+
+        let input = "15px";
+        let expected = Ok(Token::Number(15.0));
+        assert_eq!(number().lazy().parse(input).into_result(), expected);
+
+        let input = "20%";
+        let expected = Ok(Token::Number(20.0));
+        assert_eq!(number().lazy().parse(input).into_result(), expected);
     }
 
     // #[test]
@@ -270,55 +323,5 @@ mod tests {
     //     //         token!(Whitespace),
     //     //     ]),
     //     // );
-    // }
-
-    // #[test]
-    // fn test_ident() {
-    //     let input = Located::new("ident");
-    //     let expected = Ok(Token::Ident("ident".into()));
-    //     assert_eq!(ident.parse(input), expected);
-    //
-    //     let input = Located::new("ident-with-dash");
-    //     let expected = Ok(Token::Ident("ident-with-dash".into()));
-    //     assert_eq!(ident.parse(input), expected);
-    //
-    //     let input = Located::new("ident_with_underscore");
-    //     let expected = Ok(Token::Ident("ident_with_underscore".into()));
-    //     assert_eq!(ident.parse(input), expected);
-    // }
-    //
-    // #[test]
-    // fn test_comment() {
-    //     let input = "// This is a comment\n";
-    //     let expected = Ok(vec![
-    //         token!(Comment(" This is a comment".into())),
-    //         token!(Whitespace),
-    //     ]);
-    //     assert_eq!(tokenize(input), expected);
-    //
-    //     let input = "// This is a comment";
-    //     let expected = Ok(vec![token!(Comment(" This is a comment".into()))]);
-    //     assert_eq!(tokenize(input), expected);
-    //
-    //     let input = "/* This is a comment */";
-    //     let expected = Ok(vec![token!(Comment(" This is a comment ".into()))]);
-    //     assert_eq!(tokenize(input), expected);
-    //
-    //     let input = "/* This is a comment";
-    //     assert!(tokenize(input).is_err());
-    // }
-    //
-    // #[test]
-    // fn test_string() {
-    //     let input = r#""This is a string""#;
-    //     let expected = Ok(vec![token!(String("This is a string".into()))]);
-    //     assert_eq!(tokenize(input), expected);
-    //
-    //     let input = r#"'This is a string'"#;
-    //     let expected = Ok(vec![token!(String("This is a string".into()))]);
-    //     assert_eq!(tokenize(input), expected);
-    //
-    //     let input = r#""This is a string"#;
-    //     assert!(tokenize(input).is_err());
     // }
 }
