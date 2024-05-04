@@ -1,304 +1,53 @@
 use std::borrow::Cow;
 
+use crate::lexer::TokenTree;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Stylesheet<'i> {
     pub items: Vec<Item<'i>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct GuardedBlock<'i> {
-    pub guard: Option<Expression<'i>>,
-    pub items: Vec<Item<'i>>,
-}
-
+// TODO: Many of these fields can be parsed into more specific types.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Item<'i> {
-    /// A CSS at-rule (e.g. `@media ... { ... }`)
-    AtRule,
-    /// A CSS qualified rule (e.g. `body > a { ... }`)
-    QualifiedRule {
-        selector_group: SelectorGroup<'i>,
-        block: GuardedBlock<'i>,
-    },
-    /// A CSS property declaration (e.g. `color: blue;`)
-    Declaration {
+    /// Regular CSS at-rule.
+    AtRule {
         name: Cow<'i, str>,
-        value: Expression<'i>,
+        prelude: Vec<TokenTree<'i>>,
+        block: Option<Vec<TokenTree<'i>>>,
+    },
+    /// Regular CSS qualified rule.
+    QualifiedRule {
+        selectors: Vec<TokenTree<'i>>,
+        guard: Option<Vec<TokenTree<'i>>>,
+        block: Vec<TokenTree<'i>>,
+    },
+    /// Regular CSS declaration.
+    Declaration {
+        name: Vec<TokenTree<'i>>,
+        value: Vec<TokenTree<'i>>,
         important: bool,
     },
-    /// A LESS variable declaration (e.g. `@color: blue;`)
+    /// LESS mixin rule.
+    MixinRule {
+        name: Cow<'i, str>,
+        arguments: Vec<TokenTree<'i>>,
+        guard: Option<Vec<TokenTree<'i>>>,
+        block: Vec<TokenTree<'i>>,
+    },
+    /// LESS mixin call.
+    MixinCall {
+        selector: Vec<TokenTree<'i>>,
+        arguments: Vec<TokenTree<'i>>,
+    },
+    /// LESS variable declaration.
     VariableDeclaration {
         name: Cow<'i, str>,
-        value: Expression<'i>,
+        value: Vec<TokenTree<'i>>,
     },
-    /// A LESS variable call (e.g. `@ruleset();`)
-    VariableCall { name: Cow<'i, str> },
-    /// A LESS mixin declaration (e.g. `.mixin(@arg) { ... }`)
-    MixinDeclaration {
-        selector: SimpleSelector<'i>,
-        arguments: Vec<MixinDeclarationArgument<'i>>,
-        block: GuardedBlock<'i>,
-    },
-    /// A LESS mixin call (e.g. `.mixin(@arg: 'blue');`)
-    MixinCall(MixinCall<'i>),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum MixinDeclarationArgument<'i> {
-    Variable {
+    /// LESS variable call.
+    VariableCall {
         name: Cow<'i, str>,
-        default: Option<Expression<'i>>,
+        arguments: Vec<TokenTree<'i>>,
     },
-    Literal {
-        value: Expression<'i>,
-    },
-    Variadic {
-        name: Option<Cow<'i, str>>,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct MixinCall<'i> {
-    pub selector: Vec<SimpleSelector<'i>>,
-    pub arguments: Vec<MixinCallArgument<'i>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct MixinCallArgument<'i> {
-    pub name: Option<Cow<'i, str>>,
-    pub value: Expression<'i>,
-}
-
-//
-// Values
-//
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum InterpolatedValue<'i> {
-    Variable(Cow<'i, str>),
-    Property(Cow<'i, str>),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Expression<'i> {
-    /// A semicolon-separated list of values
-    SemicolonList(Vec<Expression<'i>>),
-    /// A comma-separated list of values
-    CommaList(Vec<Expression<'i>>),
-    /// A space-separated list of values
-    SpaceList(Vec<Expression<'i>>),
-
-    /// A detached ruleset (e.g. `{ color: blue; }`)
-    DetachedRuleset(Vec<Item<'i>>),
-
-    /// A unary operation (e.g. `-@spacing`)
-    UnaryOperation(UnaryOperator, Box<Expression<'i>>),
-    /// A binary operation (e.g. `2px + @spacing`)
-    BinaryOperation(BinaryOperator, Box<Expression<'i>>, Box<Expression<'i>>),
-
-    /// A variable reference (e.g. `@primary`)
-    Variable(Cow<'i, str>),
-    // TODO: Merge with Variable?
-    /// A variable lookup (e.g. `@colors[primary]`)
-    VariableLookup(Cow<'i, str>, Vec<Lookup<'i>>),
-    /// A property reference (e.g. `$color`)
-    Property(Cow<'i, str>),
-    /// An ident (e.g. `border-collapse`)
-    Ident(Cow<'i, str>),
-    /// A number (e.g. `20`, `20.5e-2`, `20%`, `20px`)
-    Numeric(f32, Option<Cow<'i, str>>),
-    /// A function call (e.g. `rgba(0, 0, 0, 0.5)`)
-    FunctionCall(Cow<'i, str>, Box<Expression<'i>>),
-    /// A quoted string (e.g. `"test"`)
-    QuotedString(Cow<'i, str>),
-    /// An interpolated string (e.g. `"color is @{color}"`, `"color is ${color}"`)
-    InterpolatedString(Vec<Cow<'i, str>>, Vec<InterpolatedValue<'i>>),
-    /// A mixin call (e.g. `.mixin()`), with optional lookup (e.g. `.mixin()[property]`)
-    MixinCall(MixinCall<'i>, Vec<Lookup<'i>>),
-}
-
-impl<'i> Expression<'i> {
-    /// Attempt to reduce the value to a single non-list value.
-    pub fn single(&self) -> Option<Self> {
-        match self {
-            Expression::SemicolonList(values)
-            | Expression::CommaList(values)
-            | Expression::SpaceList(values) => {
-                if values.len() == 1 {
-                    values[0].single()
-                } else {
-                    None
-                }
-            }
-            _ => Some(self.clone()),
-        }
-    }
-
-    /// Reduce single-item lists to their single item.
-    pub fn simplify(&self) -> Expression {
-        match self {
-            Expression::SemicolonList(values) => {
-                if values.len() == 1 {
-                    values[0].simplify()
-                } else {
-                    Expression::SemicolonList(values.iter().map(|v| v.simplify()).collect())
-                }
-            }
-            Expression::CommaList(values) => {
-                if values.len() == 1 {
-                    values[0].simplify()
-                } else {
-                    Expression::CommaList(values.iter().map(|v| v.simplify()).collect())
-                }
-            }
-            Expression::SpaceList(values) => {
-                if values.len() == 1 {
-                    values[0].simplify()
-                } else {
-                    Expression::SpaceList(values.iter().map(|v| v.simplify()).collect())
-                }
-            }
-            _ => self.clone(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Lookup<'i> {
-    /// Lookup last declaration (e.g. `@config[]`)
-    Last,
-    /// Lookup property declaration by ident (e.g. `@config[property]`)
-    Ident(Cow<'i, str>),
-    /// Lookup variable declaration by ident (e.g. `@config[@variable]`)
-    Variable(Cow<'i, str>),
-    /// Lookup property declaration by ident (e.g. `@config[$property]`)
-    Property(Cow<'i, str>),
-    /// Lookup variable declaration by variable (e.g. `@config[@@variable]`)
-    VariableVariable(Cow<'i, str>),
-    /// Lookup property declaration by variable (e.g. `@config[$@variable]`)
-    VariableProperty(Cow<'i, str>),
-    // TODO: Is InterpolatedString even possible here?
-    /// An interpolated string (e.g. `"color is @{color}"`, `"color is ${color}"`)
-    InterpolatedString(Vec<Cow<'i, str>>, Vec<InterpolatedValue<'i>>),
-}
-
-impl<'i> ToString for Lookup<'i> {
-    fn to_string(&self) -> String {
-        match self {
-            Lookup::Last => "".to_string(),
-            Lookup::Ident(name) => format!("{}", name),
-            Lookup::Variable(name) => format!("@{}", name),
-            Lookup::Property(name) => format!("${}", name),
-            Lookup::VariableVariable(name) => format!("@@{}", name),
-            Lookup::VariableProperty(name) => format!("$@{}", name),
-            Lookup::InterpolatedString(_, _) => unimplemented!(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum BinaryOperator {
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
-    And,
-    Or,
-    Equality,
-    LessThan,
-    LessThanOrEqualTo,
-    GreaterThanOrEqualTo,
-    GreaterThan,
-}
-
-impl ToString for BinaryOperator {
-    fn to_string(&self) -> String {
-        match self {
-            BinaryOperator::Add => "+".to_string(),
-            BinaryOperator::Subtract => "-".to_string(),
-            BinaryOperator::Multiply => "*".to_string(),
-            BinaryOperator::Divide => "/".to_string(),
-            BinaryOperator::And => "and".to_string(),
-            BinaryOperator::Or => "or".to_string(),
-            BinaryOperator::Equality => "==".to_string(),
-            BinaryOperator::LessThan => "<".to_string(),
-            BinaryOperator::LessThanOrEqualTo => "<=".to_string(),
-            BinaryOperator::GreaterThanOrEqualTo => ">=".to_string(),
-            BinaryOperator::GreaterThan => ">".to_string(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum UnaryOperator {
-    Not,
-    Negate,
-}
-
-//
-// Selectors
-//
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct SelectorGroup<'i>(pub Vec<Selector<'i>>);
-impl<'i> From<Vec<Selector<'i>>> for SelectorGroup<'i> {
-    fn from(value: Vec<Selector<'i>>) -> Self {
-        assert_ne!(value.len(), 0);
-        Self(value)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Selector<'i>(pub Vec<SimpleSelectorSequence<'i>>, pub Vec<Combinator>);
-impl<'i> From<(Vec<SimpleSelectorSequence<'i>>, Vec<Combinator>)> for Selector<'i> {
-    fn from(value: (Vec<SimpleSelectorSequence<'i>>, Vec<Combinator>)) -> Self {
-        assert_ne!(value.0.len(), 0);
-        assert_eq!(value.0.len(), value.1.len() + 1);
-        Self(value.0, value.1)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct SimpleSelectorSequence<'i>(pub Vec<SimpleSelector<'i>>);
-impl<'i> From<Vec<SimpleSelector<'i>>> for SimpleSelectorSequence<'i> {
-    fn from(value: Vec<SimpleSelector<'i>>) -> Self {
-        assert_ne!(value.len(), 0);
-        Self(value)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Combinator {
-    Descendant,
-    Child,
-    NextSibling,
-    SubsequentSibling,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum SimpleSelector<'i> {
-    Type(Cow<'i, str>),
-    Universal,
-    Id(Cow<'i, str>),
-    Class(Cow<'i, str>),
-    Attribute(Cow<'i, str>),
-    // TODO: Support functional pseudo-classes/pseudo-elements
-    PseudoClass(Cow<'i, str>),
-    PseudoElement(Cow<'i, str>),
-    Negation(Box<SimpleSelector<'i>>),
-}
-
-impl<'i> ToString for SimpleSelector<'i> {
-    fn to_string(&self) -> String {
-        match self {
-            SimpleSelector::Type(name) => name.to_string(),
-            SimpleSelector::Universal => "*".to_string(),
-            SimpleSelector::Id(name) => format!("#{}", name),
-            SimpleSelector::Class(name) => format!(".{}", name),
-            SimpleSelector::Attribute(name) => format!("[{}]", name),
-            SimpleSelector::PseudoClass(name) => format!(":{}", name),
-            SimpleSelector::PseudoElement(name) => format!("::{}", name),
-            SimpleSelector::Negation(selector) => format!(":not({})", selector.to_string()),
-        }
-    }
 }
