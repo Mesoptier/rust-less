@@ -27,21 +27,36 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
             )
         };
 
-        // Parse a rule block
+        // Parse a rule's block
         let rule_block = list_of_items.nested_in(tree(Delim::Brace));
 
-        // let item_variable_declaration = todo();
+        // Parse a variable declaration
+        let item_variable_declaration = {
+            group((
+                select_ref!(TokenTree::Token(Token::Symbol('@')) => ()),
+                select_ref!(TokenTree::Token(Token::Ident(ident)) => *ident),
+                junk.or_not(),
+                select_ref!(TokenTree::Token(Token::Symbol(':')) => ()),
+                any()
+                    .and_is(select_ref!(TokenTree::Token(Token::Symbol(';')) => ()).not())
+                    .repeated()
+                    .to_slice(),
+                choice((
+                    select_ref!(TokenTree::Token(Token::Symbol(';')) => ()),
+                    end(),
+                )),
+            ))
+            .map(|(_, name, _, _, value, _)| Item::VariableDeclaration { name, value })
+        };
+
         // let item_variable_call = todo();
 
         // Parse an at-rule
         let item_at_rule = {
-            let item_at_rule_end = choice((
-                end(),
-                select_ref!(
-                    TokenTree::Token(Token::Symbol(';')) => (),
-                    TokenTree::Tree(delim, _) if delim == &Delim::Brace => ()
-                ),
-            ));
+            let item_at_rule_end = select_ref!(
+                TokenTree::Token(Token::Symbol(';')) => (),
+                TokenTree::Tree(delim, _) if delim == &Delim::Brace => ()
+            );
             let item_at_rule_opt_block = choice((
                 end().to(None),
                 just(TokenTree::Token(Token::Symbol(';'))).to(None),
@@ -68,7 +83,7 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
         // let item_mixin_call = todo();
 
         let item = choice((
-            // item_variable_declaration,
+            item_variable_declaration,
             // item_variable_call,
             item_at_rule,
             // item_mixin_rule,
@@ -176,6 +191,34 @@ mod tests {
                             )]),
                         },
                         Span::new(0, 18)
+                    )]
+                },
+                Span::new(0, input.len())
+            ))
+        );
+    }
+
+    #[test]
+    fn test_item_variable_declaration() {
+        // Parse a variable declaration
+        let input = "@foo: bar;";
+        let tts = lexer().parse(input).unwrap();
+        let result = parser()
+            .parse((&tts).spanned(Span::splat(tts.len())))
+            .into_result();
+        assert_eq!(
+            result,
+            Ok((
+                Stylesheet {
+                    items: vec![(
+                        Item::VariableDeclaration {
+                            name: "foo",
+                            value: &[
+                                (TokenTree::Token(Token::Whitespace), Span::new(5, 6)),
+                                (TokenTree::Token(Token::Ident("bar")), Span::new(6, 9))
+                            ],
+                        },
+                        Span::new(0, 10)
                     )]
                 },
                 Span::new(0, input.len())

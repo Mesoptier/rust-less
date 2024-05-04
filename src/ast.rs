@@ -43,8 +43,8 @@ pub enum Item<'tokens, 'src> {
     },
     /// LESS variable declaration.
     VariableDeclaration {
-        name: Cow<'src, str>,
-        value: Vec<TokenTree<'src>>,
+        name: &'src str,
+        value: &'tokens [Spanned<TokenTree<'src>>],
     },
     /// LESS variable call.
     VariableCall {
