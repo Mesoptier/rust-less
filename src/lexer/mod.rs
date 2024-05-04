@@ -1,12 +1,13 @@
-use chumsky::prelude::*;
 use std::borrow::Cow;
+
+use chumsky::prelude::*;
 
 use crate::lexer::helpers::{is_name, would_start_identifier};
 
 mod helpers;
 
 pub type Span = SimpleSpan<usize>;
-pub type Spanned<T> = (Span, T);
+pub type Spanned<T> = (T, Span);
 pub type Err<'src> = extra::Err<Rich<'src, char, Span>>;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -63,7 +64,7 @@ fn token_tree<'src>() -> impl Parser<'src, &'src str, Spanned<TokenTree<'src>>, 
             tree(Delim::Bracket, token_tree.clone()),
             token().map(TokenTree::Token),
         ))
-        .map_with(|tt, e| (e.span(), tt))
+        .map_with(|tt, e| (tt, e.span()))
     })
 }
 
@@ -324,68 +325,68 @@ mod tests {
         assert_eq!(
             lexer().parse(input).into_result(),
             Ok(vec![
-                (Span::new(0, 13), token!(Whitespace)),
-                (Span::new(13, 18), token!(Ident("ident".into()))),
-                (Span::new(18, 19), token!(Whitespace)),
-                (Span::new(19, 34), token!(Ident("ident-with-dash".into()))),
-                (Span::new(34, 35), token!(Whitespace)),
+                (token!(Whitespace), Span::new(0, 13)),
+                (token!(Ident("ident".into())), Span::new(13, 18)),
+                (token!(Whitespace), Span::new(18, 19)),
+                (token!(Ident("ident-with-dash".into())), Span::new(19, 34)),
+                (token!(Whitespace), Span::new(34, 35)),
                 (
+                    token!(Ident("ident_with_underscore".into())),
                     Span::new(35, 56),
-                    token!(Ident("ident_with_underscore".into()))
                 ),
-                (Span::new(56, 69), token!(Whitespace)),
-                (Span::new(69, 74), token!(Hash("hash".into()))),
-                (Span::new(74, 75), token!(Whitespace)),
-                (Span::new(75, 79), token!(Hash("0ff".into()))),
-                (Span::new(79, 92), token!(Whitespace)),
+                (token!(Whitespace), Span::new(56, 69)),
+                (token!(Hash("hash".into())), Span::new(69, 74)),
+                (token!(Whitespace), Span::new(74, 75)),
+                (token!(Hash("0ff".into())), Span::new(75, 79)),
+                (token!(Whitespace), Span::new(79, 92)),
                 (
+                    token!(Comment(" This is a comment".into())),
                     Span::new(92, 112),
-                    token!(Comment(" This is a comment".into()))
                 ),
-                (Span::new(112, 125), token!(Whitespace)),
+                (token!(Whitespace), Span::new(112, 125)),
                 (
+                    token!(String("This is a string".into())),
                     Span::new(125, 143),
-                    token!(String("This is a string".into()))
                 ),
-                (Span::new(143, 156), token!(Whitespace)),
-                (Span::new(156, 162), token!(Number(123.45))),
-                (Span::new(162, 163), token!(Whitespace)),
-                (Span::new(163, 165), token!(Number(15.0))),
-                (Span::new(165, 167), token!(Ident("px".into()))),
-                (Span::new(167, 168), token!(Whitespace)),
-                (Span::new(168, 170), token!(Number(20.0))),
-                (Span::new(170, 171), token!(Symbol('%'))),
-                (Span::new(171, 184), token!(Whitespace)),
+                (token!(Whitespace), Span::new(143, 156)),
+                (token!(Number(123.45)), Span::new(156, 162)),
+                (token!(Whitespace), Span::new(162, 163)),
+                (token!(Number(15.0)), Span::new(163, 165)),
+                (token!(Ident("px".into())), Span::new(165, 167)),
+                (token!(Whitespace), Span::new(167, 168)),
+                (token!(Number(20.0)), Span::new(168, 170)),
+                (token!(Symbol('%')), Span::new(170, 171)),
+                (token!(Whitespace), Span::new(171, 184)),
                 (
-                    Span::new(184, 191),
                     tree!(
                         Paren,
-                        [(Span::new(185, 190), token!(Ident("paren".into()))),]
-                    )
+                        [(token!(Ident("paren".into())), Span::new(185, 190))]
+                    ),
+                    Span::new(184, 191),
                 ),
-                (Span::new(191, 192), token!(Whitespace)),
+                (token!(Whitespace), Span::new(191, 192)),
                 (
-                    Span::new(192, 200),
                     tree!(
                         Brace,
                         [
-                            (Span::new(193, 194), token!(Whitespace)),
-                            (Span::new(194, 199), token!(Ident("brace".into()))),
+                            (token!(Whitespace), Span::new(193, 194)),
+                            (token!(Ident("brace".into())), Span::new(194, 199)),
                         ]
-                    )
+                    ),
+                    Span::new(192, 200),
                 ),
-                (Span::new(200, 201), token!(Whitespace)),
+                (token!(Whitespace), Span::new(200, 201)),
                 (
-                    Span::new(201, 211),
                     tree!(
                         Bracket,
                         [
-                            (Span::new(202, 209), token!(Ident("bracket".into())),),
-                            (Span::new(209, 210), token!(Whitespace)),
+                            (token!(Ident("bracket".into())), Span::new(202, 209)),
+                            (token!(Whitespace), Span::new(209, 210)),
                         ]
-                    )
+                    ),
+                    Span::new(201, 211),
                 ),
-                (Span::new(211, 220), token!(Whitespace)),
+                (token!(Whitespace), Span::new(211, 220)),
             ])
         );
     }
