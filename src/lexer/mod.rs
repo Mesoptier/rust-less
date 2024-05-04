@@ -65,7 +65,7 @@ fn token_tree<'src>() -> impl Parser<'src, &'src str, (TokenTree<'src>, Span), E
 
 fn token<'src>() -> impl Parser<'src, &'src str, Token<'src>, Err<'src>> + Clone {
     choice((
-        text::whitespace().to(Token::Whitespace),
+        text::whitespace().at_least(1).to(Token::Whitespace),
         line_comment(),
         block_comment(),
         ident(),
