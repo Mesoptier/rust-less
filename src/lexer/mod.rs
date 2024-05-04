@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use chumsky::prelude::*;
 
 use crate::lexer::helpers::{is_name, would_start_identifier};
@@ -38,10 +36,10 @@ impl Delim {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token<'src> {
     Whitespace,
-    Comment(Cow<'src, str>),
-    Ident(Cow<'src, str>),
-    Hash(Cow<'src, str>),
-    String(Cow<'src, str>),
+    Comment(&'src str),
+    Ident(&'src str),
+    Hash(&'src str),
+    String(&'src str),
     Number(f32),
     Symbol(char),
 }
@@ -208,78 +206,78 @@ mod tests {
     #[test]
     fn test_line_comment() {
         let input = "// This is a comment\n";
-        let expected = Ok(Token::Comment(" This is a comment".into()));
+        let expected = Ok(Token::Comment(" This is a comment"));
         assert_eq!(line_comment().lazy().parse(input).into_result(), expected);
 
         let input = "// This is a comment";
-        let expected = Ok(Token::Comment(" This is a comment".into()));
+        let expected = Ok(Token::Comment(" This is a comment"));
         assert_eq!(line_comment().parse(input).into_result(), expected);
     }
 
     #[test]
     fn test_block_comment() {
         let input = "/* This is a comment */";
-        let expected = Ok(Token::Comment(" This is a comment ".into()));
+        let expected = Ok(Token::Comment(" This is a comment "));
         assert_eq!(block_comment().parse(input).into_result(), expected);
 
         let input = "/* This is a comment";
-        let expected = Ok(Token::Comment(" This is a comment".into()));
+        let expected = Ok(Token::Comment(" This is a comment"));
         assert_eq!(block_comment().parse(input).into_result(), expected);
     }
 
     #[test]
     fn test_ident() {
         let input = "ident";
-        let expected = Ok(Token::Ident("ident".into()));
+        let expected = Ok(Token::Ident("ident"));
         assert_eq!(ident().parse(input).into_result(), expected);
 
         let input = "ident-with-dash";
-        let expected = Ok(Token::Ident("ident-with-dash".into()));
+        let expected = Ok(Token::Ident("ident-with-dash"));
         assert_eq!(ident().parse(input).into_result(), expected);
 
         let input = "ident_with_underscore";
-        let expected = Ok(Token::Ident("ident_with_underscore".into()));
+        let expected = Ok(Token::Ident("ident_with_underscore"));
         assert_eq!(ident().parse(input).into_result(), expected);
 
         let input = "--ident";
-        let expected = Ok(Token::Ident("--ident".into()));
+        let expected = Ok(Token::Ident("--ident"));
         assert_eq!(ident().parse(input).into_result(), expected);
 
         let input = "--0ident";
-        let expected = Ok(Token::Ident("--0ident".into()));
+        let expected = Ok(Token::Ident("--0ident"));
         assert_eq!(ident().parse(input).into_result(), expected);
 
         let input = "-ident";
-        let expected = Ok(Token::Ident("-ident".into()));
+        let expected = Ok(Token::Ident("-ident"));
         assert_eq!(ident().parse(input).into_result(), expected);
 
         let input = "-0ident";
         assert!(ident().parse(input).has_errors());
 
         let input = "ident not-parsed";
-        let expected = Ok(Token::Ident("ident".into()));
+        let expected = Ok(Token::Ident("ident"));
         assert_eq!(ident().lazy().parse(input).into_result(), expected);
     }
 
     #[test]
     fn test_hash() {
         let input = "#hash";
-        let expected = Ok(Token::Hash("hash".into()));
+        let expected = Ok(Token::Hash("hash"));
         assert_eq!(hash().parse(input).into_result(), expected);
 
         let input = "#0ff";
-        let expected = Ok(Token::Hash("0ff".into()));
+        let expected = Ok(Token::Hash("0ff"));
         assert_eq!(hash().parse(input).into_result(), expected);
     }
 
     #[test]
     fn test_string() {
         let input = r#""This is a string""#;
-        let expected = Ok(Token::String("This is a string".into()));
+        let expected = Ok(Token::String("This is a string"));
         assert_eq!(string().parse(input).into_result(), expected);
 
         let input = r#"'This is a string'"#;
-        let expected = Ok(Token::String("This is a string".into()));
+        let expected = Ok(Token::String("This is a string"));
         assert_eq!(string().parse(input).into_result(), expected);
 
         let input = r#""This is a string"#;
@@ -326,42 +324,30 @@ mod tests {
             lexer().parse(input).into_result(),
             Ok(vec![
                 (token!(Whitespace), Span::new(0, 13)),
-                (token!(Ident("ident".into())), Span::new(13, 18)),
+                (token!(Ident("ident")), Span::new(13, 18)),
                 (token!(Whitespace), Span::new(18, 19)),
-                (token!(Ident("ident-with-dash".into())), Span::new(19, 34)),
+                (token!(Ident("ident-with-dash")), Span::new(19, 34)),
                 (token!(Whitespace), Span::new(34, 35)),
-                (
-                    token!(Ident("ident_with_underscore".into())),
-                    Span::new(35, 56),
-                ),
+                (token!(Ident("ident_with_underscore")), Span::new(35, 56),),
                 (token!(Whitespace), Span::new(56, 69)),
-                (token!(Hash("hash".into())), Span::new(69, 74)),
+                (token!(Hash("hash")), Span::new(69, 74)),
                 (token!(Whitespace), Span::new(74, 75)),
-                (token!(Hash("0ff".into())), Span::new(75, 79)),
+                (token!(Hash("0ff")), Span::new(75, 79)),
                 (token!(Whitespace), Span::new(79, 92)),
-                (
-                    token!(Comment(" This is a comment".into())),
-                    Span::new(92, 112),
-                ),
+                (token!(Comment(" This is a comment")), Span::new(92, 112),),
                 (token!(Whitespace), Span::new(112, 125)),
-                (
-                    token!(String("This is a string".into())),
-                    Span::new(125, 143),
-                ),
+                (token!(String("This is a string")), Span::new(125, 143),),
                 (token!(Whitespace), Span::new(143, 156)),
                 (token!(Number(123.45)), Span::new(156, 162)),
                 (token!(Whitespace), Span::new(162, 163)),
                 (token!(Number(15.0)), Span::new(163, 165)),
-                (token!(Ident("px".into())), Span::new(165, 167)),
+                (token!(Ident("px")), Span::new(165, 167)),
                 (token!(Whitespace), Span::new(167, 168)),
                 (token!(Number(20.0)), Span::new(168, 170)),
                 (token!(Symbol('%')), Span::new(170, 171)),
                 (token!(Whitespace), Span::new(171, 184)),
                 (
-                    tree!(
-                        Paren,
-                        [(token!(Ident("paren".into())), Span::new(185, 190))]
-                    ),
+                    tree!(Paren, [(token!(Ident("paren")), Span::new(185, 190))]),
                     Span::new(184, 191),
                 ),
                 (token!(Whitespace), Span::new(191, 192)),
@@ -370,7 +356,7 @@ mod tests {
                         Brace,
                         [
                             (token!(Whitespace), Span::new(193, 194)),
-                            (token!(Ident("brace".into())), Span::new(194, 199)),
+                            (token!(Ident("brace")), Span::new(194, 199)),
                         ]
                     ),
                     Span::new(192, 200),
@@ -380,7 +366,7 @@ mod tests {
                     tree!(
                         Bracket,
                         [
-                            (token!(Ident("bracket".into())), Span::new(202, 209)),
+                            (token!(Ident("bracket")), Span::new(202, 209)),
                             (token!(Whitespace), Span::new(209, 210)),
                         ]
                     ),
