@@ -109,7 +109,7 @@ fn peek_ident_start<'src>() -> impl Parser<'src, &'src str, (), Err<'src>> + Clo
 }
 
 fn ident_sequence<'src>() -> impl Parser<'src, &'src str, &'src str, Err<'src>> + Clone {
-    any().validate(|c, _, _| is_name(c)).repeated().to_slice()
+    any().filter(|c: &char| is_name(*c)).repeated().to_slice()
 }
 
 fn hash<'src>() -> impl Parser<'src, &'src str, Token<'src>, Err<'src>> + Clone {
@@ -232,6 +232,10 @@ mod tests {
 
         let input = "-0ident";
         assert!(ident().parse(input).has_errors());
+
+        let input = "ident not-parsed";
+        let expected = Ok(Token::Ident("ident".into()));
+        assert_eq!(ident().lazy().parse(input).into_result(), expected);
     }
 
     #[test]
