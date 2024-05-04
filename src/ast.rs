@@ -1,53 +1,54 @@
 use std::borrow::Cow;
 
-use crate::lexer::TokenTree;
+use crate::lexer::{Spanned, TokenTree};
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Stylesheet<'i> {
-    pub items: Vec<Item<'i>>,
+pub struct Stylesheet<'tokens, 'src> {
+    pub items: Vec<Spanned<Item<'tokens, 'src>>>,
 }
 
 // TODO: Many of these fields can be parsed into more specific types.
 #[derive(Clone, Debug, PartialEq)]
-pub enum Item<'i> {
+pub enum Item<'tokens, 'src> {
     /// Regular CSS at-rule.
     AtRule {
-        name: Cow<'i, str>,
-        prelude: Vec<TokenTree<'i>>,
-        block: Option<Vec<TokenTree<'i>>>,
+        name: &'src str,
+        prelude: &'tokens [Spanned<TokenTree<'src>>],
+        block: Option<Vec<Spanned<Item<'tokens, 'src>>>>,
     },
     /// Regular CSS qualified rule.
     QualifiedRule {
-        selectors: Vec<TokenTree<'i>>,
-        guard: Option<Vec<TokenTree<'i>>>,
-        block: Vec<TokenTree<'i>>,
+        // TODO: Rename to `prelude`?
+        selectors: Vec<TokenTree<'src>>,
+        guard: Option<Vec<TokenTree<'src>>>,
+        block: Vec<TokenTree<'src>>,
     },
     /// Regular CSS declaration.
     Declaration {
-        name: Vec<TokenTree<'i>>,
-        value: Vec<TokenTree<'i>>,
+        name: Vec<TokenTree<'src>>,
+        value: Vec<TokenTree<'src>>,
         important: bool,
     },
     /// LESS mixin rule.
     MixinRule {
-        name: Cow<'i, str>,
-        arguments: Vec<TokenTree<'i>>,
-        guard: Option<Vec<TokenTree<'i>>>,
-        block: Vec<TokenTree<'i>>,
+        name: Cow<'src, str>,
+        arguments: Vec<TokenTree<'src>>,
+        guard: Option<Vec<TokenTree<'src>>>,
+        block: Vec<TokenTree<'src>>,
     },
     /// LESS mixin call.
     MixinCall {
-        selector: Vec<TokenTree<'i>>,
-        arguments: Vec<TokenTree<'i>>,
+        selector: Vec<TokenTree<'src>>,
+        arguments: Vec<TokenTree<'src>>,
     },
     /// LESS variable declaration.
     VariableDeclaration {
-        name: Cow<'i, str>,
-        value: Vec<TokenTree<'i>>,
+        name: Cow<'src, str>,
+        value: Vec<TokenTree<'src>>,
     },
     /// LESS variable call.
     VariableCall {
-        name: Cow<'i, str>,
-        arguments: Vec<TokenTree<'i>>,
+        name: Cow<'src, str>,
+        arguments: Vec<TokenTree<'src>>,
     },
 }
