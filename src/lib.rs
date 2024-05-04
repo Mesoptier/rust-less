@@ -1,6 +1,8 @@
 pub mod ast;
 mod lexer;
 
+pub use lexer::lexer;
+
 pub fn parse(input: &str) -> ast::Stylesheet {
     // let tokens = lexer::tokenize(input).unwrap();
     // let tokens = RefStream::new(&tokens);
