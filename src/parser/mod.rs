@@ -1,6 +1,9 @@
+use std::marker::PhantomData;
+
 use chumsky::input::SpannedInput;
 use chumsky::prelude::*;
-use std::marker::PhantomData;
+
+use util::*;
 
 use crate::ast::*;
 use crate::lexer::{Delim, Span, Spanned, Token, TokenTree};
@@ -20,191 +23,67 @@ fn strip_trailing_junk<'tokens, 'src>(
     value
 }
 
+mod util {
+    use chumsky::prelude::*;
+
+    use crate::lexer::{Token, TokenTree};
+    use crate::parser::{ParserExtra, ParserInput};
+
+    pub(crate) fn junk<'tokens, 'src: 'tokens>(
+    ) -> impl Parser<'tokens, ParserInput<'tokens, 'src>, (), ParserExtra<'tokens, 'src>> + Clone
+    {
+        select_ref!(TokenTree::Token(Token::Whitespace) | TokenTree::Token(Token::Comment(_)) => ())
+            .repeated()
+            .ignored()
+    }
+
+    pub(crate) fn symbol<'tokens, 'src: 'tokens>(
+        symbol: char,
+    ) -> impl Parser<'tokens, ParserInput<'tokens, 'src>, (), ParserExtra<'tokens, 'src>> + Clone + Copy
+    {
+        select_ref!(TokenTree::Token(Token::Symbol(s)) if s == &symbol => ())
+    }
+
+    pub(crate) fn ident<'tokens, 'src: 'tokens>(
+    ) -> impl Parser<'tokens, ParserInput<'tokens, 'src>, &'src str, ParserExtra<'tokens, 'src>>
+           + Clone
+           + Copy {
+        select_ref!(TokenTree::Token(Token::Ident(ident)) => *ident)
+    }
+
+    pub(crate) fn at_ident<'tokens, 'src: 'tokens>(
+    ) -> impl Parser<'tokens, ParserInput<'tokens, 'src>, &'src str, ParserExtra<'tokens, 'src>>
+           + Clone
+           + Copy {
+        symbol('@').ignore_then(ident())
+    }
+}
+
 fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
     'tokens,
     ParserInput<'tokens, 'src>,
     Spanned<Stylesheet<'tokens, 'src>>,
     ParserExtra<'tokens, 'src>,
 > + Clone {
-    let whitespace_or_comment = select_ref!(TokenTree::Token(Token::Whitespace) | TokenTree::Token(Token::Comment(_)) => ());
-    let junk = whitespace_or_comment.repeated().ignored();
-    let symbol =
-        |symbol: char| select_ref!(TokenTree::Token(Token::Symbol(s)) if s == &symbol => ());
-    let ident = select_ref!(TokenTree::Token(Token::Ident(ident)) => *ident);
-    let at_ident = symbol('@').ignore_then(ident);
-
     // Item parsers
     let list_of_items = recursive(|list_of_items| {
-        // Parses a TokenTree::Tree of a specific delimiter and returns its contents as a slice
-        let tree = |delim: Delim| {
-            select_ref!(
-                TokenTree::Tree(d, tts) if d == &delim
-                    => tts.as_slice().spanned(Span::splat(tts.len()))
-            )
-        };
-
         // Parse a rule's block
-        let rule_block = list_of_items.nested_in(tree(Delim::Brace));
-
-        // Parse a Declaration
-        let declaration = {
-            let declaration_name = choice((
-                ident.map(DeclarationName::Ident),
-                at_ident.map(DeclarationName::Variable),
-                // TODO: Support LESS interpolation in declaration names
-            ));
-
-            // Parse component values up to a semicolon or eof
-            let declaration_value = any().and_is(symbol(';').not()).repeated().to_slice();
-
-            group((
-                declaration_name
-                    .then_ignore(junk)
-                    .then_ignore(symbol(':'))
-                    .then_ignore(junk),
-                declaration_value.then_ignore(choice((symbol(';'), end()))),
-            ))
-            .map(|(name, mut value)| {
-                value = strip_trailing_junk(value);
-
-                // Split off the !important flag
-                let important = {
-                    value
-                        .split_last_chunk::<2>()
-                        .filter(|(_, chunk)| {
-                            matches!(
-                                chunk,
-                                [
-                                    (TokenTree::Token(Token::Symbol('!')), _),
-                                    (TokenTree::Token(Token::Ident("important")), _),
-                                ]
-                            )
-                        })
-                        .inspect(|(rest_value, _)| value = rest_value)
-                        .is_some()
-                };
-
-                value = strip_trailing_junk(value);
-
-                Declaration {
-                    name,
-                    value,
-                    important,
-                }
-            })
-        };
-
-        // Parse an AtRule
-        let at_rule = {
-            // Parse the prelude up to eof, semicolon, or block.
-            let at_rule_prelude = any()
-                .and_is(
-                    select_ref!(
-                        TokenTree::Token(Token::Symbol(';')) => (),
-                        TokenTree::Tree(delim, _) if delim == &Delim::Brace => (),
-                    )
-                    .not(),
-                )
-                .repeated()
-                .to_slice();
-
-            // Parse the end of the at-rule.
-            let at_rule_end = choice((
-                end().to(None),
-                symbol(';').to(None),
-                rule_block.clone().map(Some),
-            ));
-
-            group((at_ident, at_rule_prelude, at_rule_end)).map(|(name, prelude, block)| {
-                AtRule::Generic(GenericAtRule {
-                    name,
-                    prelude,
-                    block,
-                })
-            })
-        };
-
-        // Parse a QualifiedRule
-        let qualified_rule = {
-            // Parse the prelude up to eof, semicolon, or block. Eof and semicolon are parse errors,
-            // which we'll deal with when parsing the block.
-            let qualified_rule_prelude = any()
-                .and_is(
-                    select_ref!(
-                        TokenTree::Token(Token::Symbol(';')) => (),
-                        TokenTree::Tree(delim, _) if delim == &Delim::Brace => (),
-                    )
-                    .not(),
-                )
-                .repeated()
-                .to_slice();
-
-            group((
-                qualified_rule_prelude,
-                // TODO: Deal with eof or semicolon as parse errors
-                rule_block.clone(),
-            ))
-            .map(|(prelude, block)| QualifiedRule::Generic(GenericRule { prelude, block }))
-        };
-
-        // Parse a Call
-        let call = {
-            let call_end = choice((end(), symbol(';')));
-
-            // Parse a MixinCall
-            let mixin_call = {
-                // TODO: Support namespaced selectors (e.g. `.foo.bar` or `#foo > .bar`).
-                let mixin_call_selector = symbol('.').then(ident).to_slice();
-                // TODO: Parse mixin arguments
-                let mixin_call_arguments =
-                    select_ref!(TokenTree::Tree(Delim::Paren, tts) => tts.as_slice());
-                group((
-                    mixin_call_selector,
-                    mixin_call_arguments.then_ignore(call_end),
-                ))
-                .map(|(selector, arguments)| MixinCall {
-                    selector,
-                    arguments,
-                })
-            };
-
-            // Parse a VariableCall
-            let variable_call = at_ident
-                .then_ignore(
-                    select_ref!(TokenTree::Tree(Delim::Paren, tts) if tts.is_empty() => ()),
-                )
-                .then_ignore(call_end)
-                .map(|name| VariableCall {
-                    name,
-                    _lookups: PhantomData,
-                });
-
-            // Parse a FunctionCall
-            let function_call = group((
-                ident,
-                select_ref!(TokenTree::Tree(Delim::Paren, tts) => tts.as_slice())
-                    .then_ignore(call_end),
-            ))
-            .map(|(name, arguments)| FunctionCall { name, arguments });
-
-            choice((
-                mixin_call.map(Call::Mixin),
-                variable_call.map(Call::Variable),
-                function_call.map(Call::Function),
-            ))
-        };
+        let rule_block = list_of_items.nested_in(select_ref!(
+            TokenTree::Tree(Delim::Brace, tts)
+                => tts.as_slice().spanned(Span::splat(tts.len()))
+        ));
 
         // Parse an Item
         let item = choice((
-            declaration.map(Item::Declaration),
-            call.map(Item::Call),
-            at_rule.map(Item::AtRule),
-            qualified_rule.map(Item::QualifiedRule),
+            declaration().map(Item::Declaration),
+            call().map(Item::Call),
+            at_rule(rule_block.clone()).map(Item::AtRule),
+            qualified_rule(rule_block.clone()).map(Item::QualifiedRule),
         ))
         .map_with(|item, e| (item, e.span()));
 
         // Parse a list of items separated by junk (whitespace or comments)
-        item.separated_by(junk)
+        item.separated_by(junk())
             .allow_leading()
             .allow_trailing()
             .collect()
@@ -214,10 +93,183 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
     list_of_items.map_with(|items, e| (Stylesheet { items }, e.span()))
 }
 
+/// Parses an [`AtRule`]
+fn at_rule<'tokens, 'src: 'tokens>(
+    rule_block: impl Parser<
+            'tokens,
+            ParserInput<'tokens, 'src>,
+            Vec<Spanned<Item<'tokens, 'src>>>,
+            ParserExtra<'tokens, 'src>,
+        > + Clone,
+) -> impl Parser<
+    'tokens,
+    ParserInput<'tokens, 'src>,
+    AtRule<'tokens, 'src>,
+    ParserExtra<'tokens, 'src>,
+> + Clone {
+    // Parse the prelude up to eof, semicolon, or block.
+    let at_rule_prelude = any()
+        .and_is(
+            select_ref!(
+                TokenTree::Token(Token::Symbol(';')) => (),
+                TokenTree::Tree(delim, _) if delim == &Delim::Brace => (),
+            )
+            .not(),
+        )
+        .repeated()
+        .to_slice();
+
+    // Parse the end of the at-rule.
+    let at_rule_end = choice((end().to(None), symbol(';').to(None), rule_block.map(Some)));
+
+    group((at_ident(), at_rule_prelude, at_rule_end)).map(|(name, prelude, block)| {
+        AtRule::Generic(GenericAtRule {
+            name,
+            prelude,
+            block,
+        })
+    })
+}
+
+/// Parses a [`QualifiedRule`]
+fn qualified_rule<'tokens, 'src: 'tokens>(
+    rule_block: impl Parser<
+            'tokens,
+            ParserInput<'tokens, 'src>,
+            Vec<Spanned<Item<'tokens, 'src>>>,
+            ParserExtra<'tokens, 'src>,
+        > + Clone,
+) -> impl Parser<
+    'tokens,
+    ParserInput<'tokens, 'src>,
+    QualifiedRule<'tokens, 'src>,
+    ParserExtra<'tokens, 'src>,
+> + Clone {
+    // Parse the prelude up to eof, semicolon, or block. Eof and semicolon are parse errors,
+    // which we'll deal with when parsing the block.
+    let qualified_rule_prelude = any()
+        .and_is(
+            select_ref!(
+                TokenTree::Token(Token::Symbol(';')) => (),
+                TokenTree::Tree(delim, _) if delim == &Delim::Brace => (),
+            )
+            .not(),
+        )
+        .repeated()
+        .to_slice();
+
+    group((
+        qualified_rule_prelude,
+        // TODO: Deal with eof or semicolon as parse errors
+        rule_block,
+    ))
+    .map(|(prelude, block)| QualifiedRule::Generic(GenericRule { prelude, block }))
+}
+
+/// Parses a [`Declaration`]
+fn declaration<'tokens, 'src: 'tokens>() -> impl Parser<
+    'tokens,
+    ParserInput<'tokens, 'src>,
+    Declaration<'tokens, 'src>,
+    ParserExtra<'tokens, 'src>,
+> + Clone {
+    let declaration_name = choice((
+        ident().map(DeclarationName::Ident),
+        at_ident().map(DeclarationName::Variable),
+        // TODO: Support LESS interpolation in declaration names
+    ));
+
+    // Parse component values up to a semicolon or eof
+    let declaration_value = any().and_is(symbol(';').not()).repeated().to_slice();
+
+    group((
+        declaration_name
+            .then_ignore(junk())
+            .then_ignore(symbol(':'))
+            .then_ignore(junk()),
+        declaration_value.then_ignore(choice((symbol(';'), end()))),
+    ))
+    .map(|(name, mut value)| {
+        value = strip_trailing_junk(value);
+
+        // Split off the !important flag
+        let important = {
+            value
+                .split_last_chunk::<2>()
+                .filter(|(_, chunk)| {
+                    matches!(
+                        chunk,
+                        [
+                            (TokenTree::Token(Token::Symbol('!')), _),
+                            (TokenTree::Token(Token::Ident("important")), _),
+                        ]
+                    )
+                })
+                .inspect(|(rest_value, _)| value = rest_value)
+                .is_some()
+        };
+
+        value = strip_trailing_junk(value);
+
+        Declaration {
+            name,
+            value,
+            important,
+        }
+    })
+}
+
+/// Parses a [`Call`]
+fn call<'tokens, 'src: 'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens, 'src>, Call<'tokens, 'src>, ParserExtra<'tokens, 'src>>
+       + Clone {
+    let call_end = choice((end(), symbol(';')));
+
+    // Parse a MixinCall
+    let mixin_call = {
+        // TODO: Support namespaced selectors (e.g. `.foo.bar` or `#foo > .bar`).
+        let mixin_call_selector = symbol('.').then(ident()).to_slice();
+        // TODO: Parse mixin arguments
+        let mixin_call_arguments =
+            select_ref!(TokenTree::Tree(Delim::Paren, tts) => tts.as_slice());
+        group((
+            mixin_call_selector,
+            mixin_call_arguments.then_ignore(call_end),
+        ))
+        .map(|(selector, arguments)| MixinCall {
+            selector,
+            arguments,
+        })
+    };
+
+    // Parse a VariableCall
+    let variable_call = at_ident()
+        .then_ignore(select_ref!(TokenTree::Tree(Delim::Paren, tts) if tts.is_empty() => ()))
+        .then_ignore(call_end)
+        .map(|name| VariableCall {
+            name,
+            _lookups: PhantomData,
+        });
+
+    // Parse a FunctionCall
+    let function_call = group((
+        ident(),
+        select_ref!(TokenTree::Tree(Delim::Paren, tts) => tts.as_slice()).then_ignore(call_end),
+    ))
+    .map(|(name, arguments)| FunctionCall { name, arguments });
+
+    choice((
+        mixin_call.map(Call::Mixin),
+        variable_call.map(Call::Variable),
+        function_call.map(Call::Function),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
-    use chumsky::prelude::*;
     use std::marker::PhantomData;
+
+    use chumsky::prelude::*;
 
     use crate::ast::*;
     use crate::lexer::{lexer, Span, Token, TokenTree};
