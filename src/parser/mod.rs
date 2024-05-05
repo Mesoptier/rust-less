@@ -100,7 +100,7 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
                 .and_is(
                     select_ref!(
                         TokenTree::Token(Token::Symbol(';')) => (),
-                        TokenTree::Tree(delim, _) if delim == &Delim::Brace => ()
+                        TokenTree::Tree(delim, _) if delim == &Delim::Brace => (),
                     )
                     .not(),
                 )
@@ -123,9 +123,33 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
             })
         };
 
+        let qualified_rule = {
+            // Parse the prelude up to eof, semicolon, or block. Eof and semicolon are parse errors,
+            // which we'll deal with when parsing the block.
+            let qualified_rule_prelude = any()
+                .and_is(
+                    select_ref!(
+                        TokenTree::Token(Token::Symbol(';')) => (),
+                        TokenTree::Tree(delim, _) if delim == &Delim::Brace => (),
+                    )
+                    .not(),
+                )
+                .repeated()
+                .to_slice();
+
+            group((
+                qualified_rule_prelude,
+                // TODO: Deal with eof or semicolon as parse errors
+                rule_block.clone(),
+            ))
+            .map(|(prelude, block)| QualifiedRule::Generic(GenericRule { prelude, block }))
+        };
+
+        // Parse an Item
         let item = choice((
             declaration.map(Item::Declaration),
             at_rule.map(Item::AtRule),
+            qualified_rule.map(Item::QualifiedRule),
         ))
         .map_with(|item, e| (item, e.span()));
 
@@ -302,6 +326,44 @@ mod tests {
                             important: true,
                         }),
                         Span::new(0, 20)
+                    )]
+                },
+                Span::new(0, input.len())
+            ))
+        );
+    }
+
+    #[test]
+    fn test_item_qualified_rule() {
+        // Parse a qualified rule
+        let input = "foo { bar: baz; }";
+        let tts = lexer().parse(input).unwrap();
+        let result = parser()
+            .parse((&tts).spanned(Span::splat(tts.len())))
+            .into_result();
+        assert_eq!(
+            result,
+            Ok((
+                Stylesheet {
+                    items: vec![(
+                        Item::QualifiedRule(QualifiedRule::Generic(GenericRule {
+                            prelude: &[
+                                (TokenTree::Token(Token::Ident("foo")), Span::new(0, 3)),
+                                (TokenTree::Token(Token::Whitespace), Span::new(3, 4)),
+                            ],
+                            block: vec![(
+                                Item::Declaration(Declaration {
+                                    name: DeclarationName::Ident("bar"),
+                                    value: &[(
+                                        TokenTree::Token(Token::Ident("baz")),
+                                        Span::new(11, 14)
+                                    )],
+                                    important: false,
+                                }),
+                                Span::new(6, 15)
+                            )],
+                        })),
+                        Span::new(0, 17)
                     )]
                 },
                 Span::new(0, input.len())
