@@ -1,5 +1,6 @@
 use chumsky::input::SpannedInput;
 use chumsky::prelude::*;
+use std::marker::PhantomData;
 
 use crate::ast::*;
 use crate::lexer::{Delim, Span, Spanned, Token, TokenTree};
@@ -123,6 +124,7 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
             })
         };
 
+        // Parse a QualifiedRule
         let qualified_rule = {
             // Parse the prelude up to eof, semicolon, or block. Eof and semicolon are parse errors,
             // which we'll deal with when parsing the block.
@@ -145,9 +147,57 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
             .map(|(prelude, block)| QualifiedRule::Generic(GenericRule { prelude, block }))
         };
 
+        // Parse a Call
+        let call = {
+            let call_end = choice((end(), symbol(';')));
+
+            // Parse a MixinCall
+            let mixin_call = {
+                // TODO: Support namespaced selectors (e.g. `.foo.bar` or `#foo > .bar`).
+                let mixin_call_selector = symbol('.').then(ident).to_slice();
+                // TODO: Parse mixin arguments
+                let mixin_call_arguments =
+                    select_ref!(TokenTree::Tree(Delim::Paren, tts) => tts.as_slice());
+                group((
+                    mixin_call_selector,
+                    mixin_call_arguments.then_ignore(call_end),
+                ))
+                .map(|(selector, arguments)| MixinCall {
+                    selector,
+                    arguments,
+                })
+            };
+
+            // Parse a VariableCall
+            let variable_call = at_ident
+                .then_ignore(
+                    select_ref!(TokenTree::Tree(Delim::Paren, tts) if tts.is_empty() => ()),
+                )
+                .then_ignore(call_end)
+                .map(|name| VariableCall {
+                    name,
+                    _lookups: PhantomData,
+                });
+
+            // Parse a FunctionCall
+            let function_call = group((
+                ident,
+                select_ref!(TokenTree::Tree(Delim::Paren, tts) => tts.as_slice())
+                    .then_ignore(call_end),
+            ))
+            .map(|(name, arguments)| FunctionCall { name, arguments });
+
+            choice((
+                mixin_call.map(Call::Mixin),
+                variable_call.map(Call::Variable),
+                function_call.map(Call::Function),
+            ))
+        };
+
         // Parse an Item
         let item = choice((
             declaration.map(Item::Declaration),
+            call.map(Item::Call),
             at_rule.map(Item::AtRule),
             qualified_rule.map(Item::QualifiedRule),
         ))
@@ -167,6 +217,7 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
 #[cfg(test)]
 mod tests {
     use chumsky::prelude::*;
+    use std::marker::PhantomData;
 
     use crate::ast::*;
     use crate::lexer::{lexer, Span, Token, TokenTree};
@@ -364,6 +415,84 @@ mod tests {
                             )],
                         })),
                         Span::new(0, 17)
+                    )]
+                },
+                Span::new(0, input.len())
+            ))
+        );
+    }
+
+    #[test]
+    fn test_item_call() {
+        // Parse a mixin call
+        let input = ".foo(@arg: blue);";
+        let tts = lexer().parse(input).unwrap();
+        let result = parser()
+            .parse((&tts).spanned(Span::splat(tts.len())))
+            .into_result();
+        assert_eq!(
+            result,
+            Ok((
+                Stylesheet {
+                    items: vec![(
+                        Item::Call(Call::Mixin(MixinCall {
+                            selector: &[
+                                (TokenTree::Token(Token::Symbol('.')), Span::new(0, 1)),
+                                (TokenTree::Token(Token::Ident("foo")), Span::new(1, 4))
+                            ],
+                            arguments: &[
+                                (TokenTree::Token(Token::Symbol('@')), Span::new(5, 6)),
+                                (TokenTree::Token(Token::Ident("arg")), Span::new(6, 9)),
+                                (TokenTree::Token(Token::Symbol(':')), Span::new(9, 10)),
+                                (TokenTree::Token(Token::Whitespace), Span::new(10, 11)),
+                                (TokenTree::Token(Token::Ident("blue")), Span::new(11, 15)),
+                            ],
+                        })),
+                        Span::new(0, 17)
+                    )]
+                },
+                Span::new(0, input.len())
+            ))
+        );
+
+        // Parse a variable call
+        let input = "@foo();";
+        let tts = lexer().parse(input).unwrap();
+        let result = parser()
+            .parse((&tts).spanned(Span::splat(tts.len())))
+            .into_result();
+        assert_eq!(
+            result,
+            Ok((
+                Stylesheet {
+                    items: vec![(
+                        Item::Call(Call::Variable(VariableCall {
+                            name: "foo",
+                            _lookups: PhantomData,
+                        })),
+                        Span::new(0, 7)
+                    )]
+                },
+                Span::new(0, input.len())
+            ))
+        );
+
+        // Parse a function call
+        let input = "foo();";
+        let tts = lexer().parse(input).unwrap();
+        let result = parser()
+            .parse((&tts).spanned(Span::splat(tts.len())))
+            .into_result();
+        assert_eq!(
+            result,
+            Ok((
+                Stylesheet {
+                    items: vec![(
+                        Item::Call(Call::Function(FunctionCall {
+                            name: "foo",
+                            arguments: &[],
+                        })),
+                        Span::new(0, 6)
                     )]
                 },
                 Span::new(0, input.len())

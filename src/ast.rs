@@ -111,7 +111,7 @@ pub enum Call<'tokens, 'src> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MixinCall<'tokens, 'src> {
-    pub selectors: &'tokens [Spanned<TokenTree<'src>>],
+    pub selector: &'tokens [Spanned<TokenTree<'src>>],
     pub arguments: &'tokens [Spanned<TokenTree<'src>>],
 }
 
@@ -119,7 +119,7 @@ pub struct MixinCall<'tokens, 'src> {
 pub struct VariableCall<'tokens, 'src> {
     pub name: &'src str,
     // TODO: Support lookups.
-    _lookups: PhantomData<&'tokens ()>,
+    pub _lookups: PhantomData<&'tokens ()>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
