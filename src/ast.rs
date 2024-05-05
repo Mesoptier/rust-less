@@ -24,6 +24,7 @@ pub struct Stylesheet<'tokens, 'src> {
 ///  - [`Call`]
 ///      - [`MixinCall`] (e.g. `.mixin(blue);`)
 ///      - [`VariableCall`] (e.g. `@detached-ruleset();`)
+///      - [`FunctionCall`] (e.g. `each(red blue green, {});`)
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Item<'tokens, 'src> {
@@ -105,6 +106,7 @@ pub enum DeclarationName<'tokens, 'src> {
 pub enum Call<'tokens, 'src> {
     Mixin(MixinCall<'tokens, 'src>),
     Variable(VariableCall<'tokens, 'src>),
+    Function(FunctionCall<'tokens, 'src>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -118,4 +120,10 @@ pub struct VariableCall<'tokens, 'src> {
     pub name: &'src str,
     // TODO: Support lookups.
     _lookups: PhantomData<&'tokens ()>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FunctionCall<'tokens, 'src> {
+    pub name: &'src str,
+    pub arguments: &'tokens [Spanned<TokenTree<'src>>],
 }
