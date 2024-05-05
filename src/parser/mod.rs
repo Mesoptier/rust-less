@@ -8,6 +8,17 @@ type ParserInput<'tokens, 'src> =
     SpannedInput<TokenTree<'src>, Span, &'tokens [Spanned<TokenTree<'src>>]>;
 type ParserExtra<'tokens, 'src> = extra::Err<Rich<'tokens, TokenTree<'src>, Span>>;
 
+fn strip_trailing_junk<'tokens, 'src>(
+    mut value: &'tokens [Spanned<TokenTree<'src>>],
+) -> &'tokens [Spanned<TokenTree<'src>>] {
+    while let Some(((TokenTree::Token(Token::Whitespace | Token::Comment(_)), _), rest_value)) =
+        value.split_last()
+    {
+        value = rest_value;
+    }
+    value
+}
+
 fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
     'tokens,
     ParserInput<'tokens, 'src>,
@@ -73,7 +84,52 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
 
         // let item_mixin_rule = todo();
         // let item_qualified_rule = todo();
-        // let item_declaration = todo();
+
+        // Parse a declaration
+        let item_declaration = {
+            group((
+                // Parse the declaration name
+                ident
+                    .map(DeclarationName::Literal)
+                    .then_ignore(junk.or_not())
+                    .then_ignore(symbol(':')),
+                // Parse component values up to a semicolon or eof
+                any()
+                    .and_is(symbol(';').not())
+                    .repeated()
+                    .to_slice()
+                    .then_ignore(choice((symbol(';'), end()))),
+            ))
+            .map(|(name, mut value)| {
+                value = strip_trailing_junk(value);
+
+                // Split off the !important flag
+                let important = {
+                    value
+                        .split_last_chunk::<2>()
+                        .filter(|(_, chunk)| {
+                            matches!(
+                                chunk,
+                                [
+                                    (TokenTree::Token(Token::Symbol('!')), _),
+                                    (TokenTree::Token(Token::Ident("important")), _),
+                                ]
+                            )
+                        })
+                        .inspect(|(rest_value, _)| value = rest_value)
+                        .is_some()
+                };
+
+                value = strip_trailing_junk(value);
+
+                Item::Declaration {
+                    name,
+                    value,
+                    important,
+                }
+            })
+        };
+
         // let item_mixin_call = todo();
 
         let item = choice((
@@ -82,7 +138,7 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
             item_at_rule,
             // item_mixin_rule,
             // item_qualified_rule,
-            // item_declaration,
+            item_declaration,
             // item_mixin_call,
         ))
         .map_with(|item, e| (item, e.span()));
@@ -100,9 +156,9 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::*;
     use chumsky::prelude::*;
 
+    use crate::ast::*;
     use crate::lexer::{lexer, Span, Token, TokenTree};
     use crate::parser::parser;
 
@@ -213,6 +269,61 @@ mod tests {
                             ],
                         },
                         Span::new(0, 10)
+                    )]
+                },
+                Span::new(0, input.len())
+            ))
+        );
+    }
+
+    #[test]
+    fn test_item_declaration() {
+        // Parse a declaration
+        let input = "foo: bar;";
+        let tts = lexer().parse(input).unwrap();
+        let result = parser()
+            .parse((&tts).spanned(Span::splat(tts.len())))
+            .into_result();
+        assert_eq!(
+            result,
+            Ok((
+                Stylesheet {
+                    items: vec![(
+                        Item::Declaration {
+                            name: DeclarationName::Literal("foo"),
+                            value: &[
+                                (TokenTree::Token(Token::Whitespace), Span::new(4, 5)),
+                                (TokenTree::Token(Token::Ident("bar")), Span::new(5, 8))
+                            ],
+                            important: false,
+                        },
+                        Span::new(0, 9)
+                    )]
+                },
+                Span::new(0, input.len())
+            ))
+        );
+
+        // Parse a declaration with important
+        let input = "foo: bar !important;";
+        let tts = lexer().parse(input).unwrap();
+        let result = parser()
+            .parse((&tts).spanned(Span::splat(tts.len())))
+            .into_result();
+        assert_eq!(
+            result,
+            Ok((
+                Stylesheet {
+                    items: vec![(
+                        Item::Declaration {
+                            name: DeclarationName::Literal("foo"),
+                            value: &[
+                                (TokenTree::Token(Token::Whitespace), Span::new(4, 5)),
+                                (TokenTree::Token(Token::Ident("bar")), Span::new(5, 8))
+                            ],
+                            important: true,
+                        },
+                        Span::new(0, 20)
                     )]
                 },
                 Span::new(0, input.len())
