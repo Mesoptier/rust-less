@@ -59,7 +59,7 @@ mod util {
     }
 }
 
-fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
+pub fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
     'tokens,
     ParserInput<'tokens, 'src>,
     Spanned<Stylesheet<'tokens, 'src>>,
