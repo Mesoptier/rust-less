@@ -16,5 +16,5 @@ criterion = "0.5.1"
 serde_json = "1.0.116"
 
 [[bench]]
-name = "lexer"
+name = "less"
 harness = false
