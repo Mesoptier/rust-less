@@ -1,388 +1,554 @@
-use std::borrow::Cow;
+use std::marker::PhantomData;
 
-use winnow::combinator::{alt, cut_err, eof, opt, preceded, repeat, repeat_till, terminated};
-use winnow::error::StrContext;
-use winnow::token::{any, one_of};
-use winnow::{seq, PResult, Parser};
+use chumsky::input::SpannedInput;
+use chumsky::prelude::*;
 
-use crate::ast::{Item, Stylesheet};
-use crate::lexer::{Delim, Token, TokenTree};
-use crate::ref_stream::RefStream;
+use util::*;
 
-type TokenStream<'t, 'i> = RefStream<'t, TokenTree<'i>>;
+use crate::ast::*;
+use crate::lexer::{Delim, Span, Spanned, Token, TokenTree};
 
-fn whitespace_or_comment<'t, 'i>(input: &mut TokenStream<'t, 'i>) -> PResult<&'t TokenTree<'i>> {
-    one_of(|tt| matches!(tt, &TokenTree::Token(Token::Whitespace | Token::Comment(_))))
-        .parse_next(input)
+type ParserInput<'tokens, 'src> =
+    SpannedInput<TokenTree<'src>, Span, &'tokens [Spanned<TokenTree<'src>>]>;
+type ParserExtra<'tokens, 'src> = extra::Err<Rich<'tokens, TokenTree<'src>, Span>>;
+
+fn strip_trailing_junk<'tokens, 'src>(
+    mut value: &'tokens [Spanned<TokenTree<'src>>],
+) -> &'tokens [Spanned<TokenTree<'src>>] {
+    while let Some(((TokenTree::Token(Token::Whitespace | Token::Comment(_)), _), rest_value)) =
+        value.split_last()
+    {
+        value = rest_value;
+    }
+    value
 }
 
-/// Consume any number of whitespace or comments.
-fn whitespace(input: &mut TokenStream) -> PResult<()> {
-    repeat(0.., whitespace_or_comment).parse_next(input)
-}
+mod util {
+    use chumsky::prelude::*;
 
-fn symbol<'i>(c: char) -> impl FnMut(&mut TokenStream<'_, 'i>) -> PResult<()> {
-    move |input| {
-        any.verify_map(|tt| match tt {
-            &TokenTree::Token(Token::Symbol(s)) if s == c => Some(()),
-            _ => None,
-        })
-        .parse_next(input)
+    use crate::lexer::{Token, TokenTree};
+    use crate::parser::{ParserExtra, ParserInput};
+
+    pub(crate) fn junk<'tokens, 'src: 'tokens>(
+    ) -> impl Parser<'tokens, ParserInput<'tokens, 'src>, (), ParserExtra<'tokens, 'src>> + Clone
+    {
+        select_ref!(TokenTree::Token(Token::Whitespace) | TokenTree::Token(Token::Comment(_)) => ())
+            .repeated()
+            .ignored()
+    }
+
+    pub(crate) fn symbol<'tokens, 'src: 'tokens>(
+        symbol: char,
+    ) -> impl Parser<'tokens, ParserInput<'tokens, 'src>, (), ParserExtra<'tokens, 'src>> + Clone + Copy
+    {
+        select_ref!(TokenTree::Token(Token::Symbol(s)) if s == &symbol => ())
+    }
+
+    pub(crate) fn ident<'tokens, 'src: 'tokens>(
+    ) -> impl Parser<'tokens, ParserInput<'tokens, 'src>, &'src str, ParserExtra<'tokens, 'src>>
+           + Clone
+           + Copy {
+        select_ref!(TokenTree::Token(Token::Ident(ident)) => *ident)
+    }
+
+    pub(crate) fn at_ident<'tokens, 'src: 'tokens>(
+    ) -> impl Parser<'tokens, ParserInput<'tokens, 'src>, &'src str, ParserExtra<'tokens, 'src>>
+           + Clone
+           + Copy {
+        symbol('@').ignore_then(ident())
     }
 }
 
-fn ident<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Cow<'i, str>> {
-    any.verify_map(|tt: &'_ TokenTree<'i>| match tt {
-        TokenTree::Token(Token::Ident(ident)) => Some(ident.clone()),
-        _ => None,
-    })
-    .parse_next(input)
+pub fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
+    'tokens,
+    ParserInput<'tokens, 'src>,
+    Spanned<Stylesheet<'tokens, 'src>>,
+    ParserExtra<'tokens, 'src>,
+> + Clone {
+    // Item parsers
+    let list_of_items = recursive(|list_of_items| {
+        // Parse a rule's block
+        let rule_block = list_of_items.nested_in(select_ref!(
+            TokenTree::Tree(Delim::Brace, tts)
+                => tts.as_slice().spanned(Span::splat(tts.len()))
+        ));
+
+        // Parse an Item
+        let item = choice((
+            declaration().map(Item::Declaration),
+            call().map(Item::Call),
+            at_rule(rule_block.clone()).map(Item::AtRule),
+            qualified_rule(rule_block.clone()).map(Item::QualifiedRule),
+        ))
+        .map_with(|item, e| (item, e.span()));
+
+        // Parse a list of items separated by junk (whitespace or comments)
+        item.separated_by(junk())
+            .allow_leading()
+            .allow_trailing()
+            .collect()
+    });
+
+    // A stylesheet is just a list of items
+    list_of_items.map_with(|items, e| (Stylesheet { items }, e.span()))
 }
 
-fn simple_block<'i>(
-    delim: Delim,
-) -> impl FnMut(&mut TokenStream<'_, 'i>) -> PResult<Vec<TokenTree<'i>>> {
-    move |input| {
-        any.verify_map(|tt: &'_ TokenTree<'i>| match tt {
-            TokenTree::Delim(d, tokens) if *d == delim => Some(tokens.clone()),
-            _ => None,
-        })
-        .parse_next(input)
-    }
-}
+/// Parses an [`AtRule`]
+fn at_rule<'tokens, 'src: 'tokens>(
+    rule_block: impl Parser<
+            'tokens,
+            ParserInput<'tokens, 'src>,
+            Vec<Spanned<Item<'tokens, 'src>>>,
+            ParserExtra<'tokens, 'src>,
+        > + Clone,
+) -> impl Parser<
+    'tokens,
+    ParserInput<'tokens, 'src>,
+    AtRule<'tokens, 'src>,
+    ParserExtra<'tokens, 'src>,
+> + Clone {
+    // Parse the prelude up to eof, semicolon, or block.
+    let at_rule_prelude = any()
+        .and_is(
+            select_ref!(
+                TokenTree::Token(Token::Symbol(';')) => (),
+                TokenTree::Tree(delim, _) if delim == &Delim::Brace => (),
+            )
+            .not(),
+        )
+        .repeated()
+        .to_slice();
 
-fn guarded_block<'i>(
-    input: &mut TokenStream<'_, 'i>,
-) -> PResult<(Option<Vec<TokenTree<'i>>>, Vec<TokenTree<'i>>)> {
-    seq!(
-        // Guard
-        opt(preceded(
-            (
-                whitespace,
-                any.verify(
-                    |tt| matches!(tt, TokenTree::Token(Token::Ident(ident)) if ident == "when")
-                ),
-                whitespace,
-            ),
-            cut_err(simple_block(Delim::Paren)),
-        )),
-        // Block
-        preceded(whitespace, simple_block(Delim::Brace)),
-    )
-    .parse_next(input)
-}
+    // Parse the end of the at-rule.
+    let at_rule_end = choice((end().to(None), symbol(';').to(None), rule_block.map(Some)));
 
-fn component_value<'t, 'i>(input: &mut TokenStream<'t, 'i>) -> PResult<&'t TokenTree<'i>> {
-    any.parse_next(input)
-}
-
-pub fn stylesheet<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Stylesheet<'i>> {
-    preceded(
-        whitespace,
-        repeat_till(0.., cut_err(terminated(item, whitespace)), eof),
-    )
-    .map(|(items, _)| Stylesheet { items })
-    .parse_next(input)
-}
-
-fn item<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
-    alt((
-        item_variable_declaration.context(StrContext::Label("item_variable_declaration")),
-        item_variable_call.context(StrContext::Label("item_variable_call")),
-        item_at_rule.context(StrContext::Label("item_at_rule")),
-        item_mixin_rule.context(StrContext::Label("item_mixin_rule")),
-        item_qualified_rule.context(StrContext::Label("item_qualified_rule")),
-        item_declaration.context(StrContext::Label("item_declaration")),
-        item_mixin_call.context(StrContext::Label("item_mixin_call")),
-    ))
-    .parse_next(input)
-}
-
-fn item_at_rule<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
-    seq!(
-        _: symbol('@'),
-        ident,
-        repeat_till(0.., any.map(Clone::clone), preceded(whitespace, alt((
-            eof.value(None),
-            symbol(';').value(None),
-            simple_block(Delim::Brace).map(Some),
-        )))),
-    )
-    .map(|(name, (prelude, block))| Item::AtRule {
-        name,
-        prelude,
-        block,
-    })
-    .parse_next(input)
-}
-
-fn item_mixin_rule<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
-    seq!(
-        _: symbol('.'),
-        ident,
-        simple_block(Delim::Paren),
-        _: whitespace,
-        guarded_block,
-    )
-    .map(|(name, arguments, (guard, block))| Item::MixinRule {
-        name,
-        arguments,
-        guard,
-        block,
-    })
-    .parse_next(input)
-}
-
-fn item_qualified_rule<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
-    repeat_till(1.., component_value.map(Clone::clone), guarded_block)
-        .map(|(selectors, (guard, block))| Item::QualifiedRule {
-            selectors,
-            guard,
+    group((at_ident(), at_rule_prelude, at_rule_end)).map(|(name, prelude, block)| {
+        AtRule::Generic(GenericAtRule {
+            name,
+            prelude,
             block,
         })
-        .parse_next(input)
+    })
 }
 
-// TODO: https://drafts.csswg.org/css-syntax/#consume-declaration
-fn item_declaration<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
-    seq!(
-        repeat_till(
-            1..,
-            component_value.map(Clone::clone),
-            (whitespace, symbol(':'), whitespace)
-        ),
-        repeat_till(
-            1..,
-            component_value.map(Clone::clone),
-            (whitespace, alt((symbol(';'), eof.void())))
-        ),
-    )
-    .map(|((name, _), (value, _))| {
-        let mut value: Vec<TokenTree> = value;
-        let mut important = false;
+/// Parses a [`QualifiedRule`]
+fn qualified_rule<'tokens, 'src: 'tokens>(
+    rule_block: impl Parser<
+            'tokens,
+            ParserInput<'tokens, 'src>,
+            Vec<Spanned<Item<'tokens, 'src>>>,
+            ParserExtra<'tokens, 'src>,
+        > + Clone,
+) -> impl Parser<
+    'tokens,
+    ParserInput<'tokens, 'src>,
+    QualifiedRule<'tokens, 'src>,
+    ParserExtra<'tokens, 'src>,
+> + Clone {
+    // Parse the prelude up to eof, semicolon, or block. Eof and semicolon are parse errors,
+    // which we'll deal with when parsing the block.
+    let qualified_rule_prelude = any()
+        .and_is(
+            select_ref!(
+                TokenTree::Token(Token::Symbol(';')) => (),
+                TokenTree::Tree(delim, _) if delim == &Delim::Brace => (),
+            )
+            .not(),
+        )
+        .repeated()
+        .to_slice();
 
-        // Parse `!important` flag.
-        if value.ends_with(&[
-            TokenTree::Token(Token::Symbol('!')),
-            TokenTree::Token(Token::Ident("important".into())),
-        ]) {
-            important = true;
-            value.pop();
-            value.pop();
-        }
+    group((
+        qualified_rule_prelude,
+        // TODO: Deal with eof or semicolon as parse errors
+        rule_block,
+    ))
+    .map(|(prelude, block)| QualifiedRule::Generic(GenericRule { prelude, block }))
+}
 
-        // Remove trailing whitespace or comments.
-        while let Some(TokenTree::Token(Token::Whitespace | Token::Comment(_))) = value.last() {
-            value.pop();
-        }
+/// Parses a [`Declaration`]
+fn declaration<'tokens, 'src: 'tokens>() -> impl Parser<
+    'tokens,
+    ParserInput<'tokens, 'src>,
+    Declaration<'tokens, 'src>,
+    ParserExtra<'tokens, 'src>,
+> + Clone {
+    let declaration_name = choice((
+        ident().map(DeclarationName::Ident),
+        at_ident().map(DeclarationName::Variable),
+        // TODO: Support LESS interpolation in declaration names
+    ));
 
-        Item::Declaration {
+    // Parse component values up to a semicolon or eof
+    let declaration_value = any().and_is(symbol(';').not()).repeated().to_slice();
+
+    group((
+        declaration_name
+            .then_ignore(junk())
+            .then_ignore(symbol(':'))
+            .then_ignore(junk()),
+        declaration_value.then_ignore(choice((symbol(';'), end()))),
+    ))
+    .map(|(name, mut value)| {
+        value = strip_trailing_junk(value);
+
+        // Split off the !important flag
+        let important = {
+            value
+                .split_last_chunk::<2>()
+                .filter(|(_, chunk)| {
+                    matches!(
+                        chunk,
+                        [
+                            (TokenTree::Token(Token::Symbol('!')), _),
+                            (TokenTree::Token(Token::Ident("important")), _),
+                        ]
+                    )
+                })
+                .inspect(|(rest_value, _)| value = rest_value)
+                .is_some()
+        };
+
+        value = strip_trailing_junk(value);
+
+        Declaration {
             name,
             value,
             important,
         }
     })
-    .parse_next(input)
 }
 
-fn item_variable_declaration<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
-    seq!(
-        _: symbol('@'),
-        ident,
-        _: (whitespace, symbol(':'), whitespace),
-        repeat_till(0.., any.map(Clone::clone), (whitespace, symbol(';'))),
-    )
-    .map(|(name, (value, _))| Item::VariableDeclaration { name, value })
-    .parse_next(input)
-}
+/// Parses a [`Call`]
+fn call<'tokens, 'src: 'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens, 'src>, Call<'tokens, 'src>, ParserExtra<'tokens, 'src>>
+       + Clone {
+    let call_end = choice((end(), symbol(';')));
 
-fn item_variable_call<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
-    seq!(_: symbol('@'), ident, simple_block(Delim::Paren), _: (whitespace, symbol(';')))
-        .map(|(name, arguments)| Item::VariableCall { name, arguments })
-        .parse_next(input)
-}
+    // Parse a MixinCall
+    let mixin_call = {
+        // TODO: Support namespaced selectors (e.g. `.foo.bar` or `#foo > .bar`).
+        let mixin_call_selector = symbol('.').then(ident()).to_slice();
+        // TODO: Parse mixin arguments
+        let mixin_call_arguments =
+            select_ref!(TokenTree::Tree(Delim::Paren, tts) => tts.as_slice());
+        group((
+            mixin_call_selector,
+            mixin_call_arguments.then_ignore(call_end),
+        ))
+        .map(|(selector, arguments)| MixinCall {
+            selector,
+            arguments,
+        })
+    };
 
-fn item_mixin_call<'i>(input: &mut TokenStream<'_, 'i>) -> PResult<Item<'i>> {
-    todo!()
+    // Parse a VariableCall
+    let variable_call = at_ident()
+        .then_ignore(select_ref!(TokenTree::Tree(Delim::Paren, tts) if tts.is_empty() => ()))
+        .then_ignore(call_end)
+        .map(|name| VariableCall {
+            name,
+            _lookups: PhantomData,
+        });
+
+    // Parse a FunctionCall
+    let function_call = group((
+        ident(),
+        select_ref!(TokenTree::Tree(Delim::Paren, tts) => tts.as_slice()).then_ignore(call_end),
+    ))
+    .map(|(name, arguments)| FunctionCall { name, arguments });
+
+    choice((
+        mixin_call.map(Call::Mixin),
+        variable_call.map(Call::Variable),
+        function_call.map(Call::Function),
+    ))
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::lexer::tokenize;
+    use std::marker::PhantomData;
 
-    use super::*;
+    use chumsky::prelude::*;
 
-    macro_rules! assert_parse_ok {
-        ($input:expr, $expected:expr) => {
-            let tokens = tokenize($input).unwrap();
-            let mut input = RefStream::new(&tokens);
-            let result = item(&mut input);
-            assert_eq!(result, Ok($expected));
-            assert_eq!(input.into_inner(), &[]);
-        };
-    }
+    use crate::ast::*;
+    use crate::lexer::{lexer, Span, Token, TokenTree};
+    use crate::parser::parser;
 
     #[test]
-    fn test_variable_declaration() {
-        assert_parse_ok!(
-            "@foo: bar, baz;",
-            Item::VariableDeclaration {
-                name: "foo".into(),
-                value: vec![
-                    TokenTree::Token(Token::Ident("bar".into())),
-                    TokenTree::Token(Token::Symbol(',')),
-                    TokenTree::Token(Token::Whitespace),
-                    TokenTree::Token(Token::Ident("baz".into())),
-                ],
-            }
-        );
-    }
-
-    #[test]
-    fn test_variable_call() {
-        assert_parse_ok!(
-            "@foo(bar, baz);",
-            Item::VariableCall {
-                name: "foo".into(),
-                arguments: vec![
-                    TokenTree::Token(Token::Ident("bar".into())),
-                    TokenTree::Token(Token::Symbol(',')),
-                    TokenTree::Token(Token::Whitespace),
-                    TokenTree::Token(Token::Ident("baz".into())),
-                ],
-            }
-        );
-    }
-
-    #[test]
-    fn test_mixin_rule() {
-        assert_parse_ok!(
-            ".foo(bar, baz) { }",
-            Item::MixinRule {
-                name: "foo".into(),
-                arguments: vec![
-                    TokenTree::Token(Token::Ident("bar".into())),
-                    TokenTree::Token(Token::Symbol(',')),
-                    TokenTree::Token(Token::Whitespace),
-                    TokenTree::Token(Token::Ident("baz".into())),
-                ],
-                guard: None,
-                block: vec![TokenTree::Token(Token::Whitespace)],
-            }
+    fn test_item_at_rule() {
+        // Parse an at-rule with no prelude or block
+        let input = "@foo;";
+        let tts = lexer().parse(input).unwrap();
+        let result = parser()
+            .parse((&tts).spanned(Span::splat(tts.len())))
+            .into_result();
+        assert_eq!(
+            result,
+            Ok((
+                Stylesheet {
+                    items: vec![(
+                        Item::AtRule(AtRule::Generic(GenericAtRule {
+                            name: "foo",
+                            prelude: &[],
+                            block: None,
+                        })),
+                        Span::new(0, 5)
+                    )]
+                },
+                Span::new(0, input.len())
+            ))
         );
 
-        assert_parse_ok!(
-            ".foo(bar, baz) when (true) { }",
-            Item::MixinRule {
-                name: "foo".into(),
-                arguments: vec![
-                    TokenTree::Token(Token::Ident("bar".into())),
-                    TokenTree::Token(Token::Symbol(',')),
-                    TokenTree::Token(Token::Whitespace),
-                    TokenTree::Token(Token::Ident("baz".into())),
-                ],
-                guard: Some(vec![TokenTree::Token(Token::Ident("true".into()))]),
-                block: vec![TokenTree::Token(Token::Whitespace)],
-            }
-        );
-    }
-
-    #[test]
-    fn test_qualified_rule() {
-        assert_parse_ok!(
-            "foo { }",
-            Item::QualifiedRule {
-                selectors: vec![TokenTree::Token(Token::Ident("foo".into()))],
-                guard: None,
-                block: vec![TokenTree::Token(Token::Whitespace)],
-            }
-        );
-    }
-
-    #[test]
-    fn test_at_rule() {
-        assert_parse_ok!(
-            "@foo;",
-            Item::AtRule {
-                name: "foo".into(),
-                prelude: vec![],
-                block: None,
-            }
+        // Parse an at-rule with a simple prelude and no block
+        let input = "@foo bar;";
+        let tts = lexer().parse(input).unwrap();
+        let result = parser()
+            .parse((&tts).spanned(Span::splat(tts.len())))
+            .into_result();
+        assert_eq!(
+            result,
+            Ok((
+                Stylesheet {
+                    items: vec![(
+                        Item::AtRule(AtRule::Generic(GenericAtRule {
+                            name: "foo",
+                            prelude: &[
+                                (TokenTree::Token(Token::Whitespace), Span::new(4, 5)),
+                                (TokenTree::Token(Token::Ident("bar")), Span::new(5, 8))
+                            ],
+                            block: None,
+                        })),
+                        Span::new(0, 9)
+                    )]
+                },
+                Span::new(0, input.len())
+            ))
         );
 
-        assert_parse_ok!(
-            "@foo bar;",
-            Item::AtRule {
-                name: "foo".into(),
-                prelude: vec![
-                    TokenTree::Token(Token::Whitespace),
-                    TokenTree::Token(Token::Ident("bar".into()))
-                ],
-                block: None,
-            }
-        );
-
-        assert_parse_ok!(
-            "@foo { }",
-            Item::AtRule {
-                name: "foo".into(),
-                prelude: vec![],
-                block: Some(vec![TokenTree::Token(Token::Whitespace)]),
-            }
+        // Parse an at-rule with a simple prelude and block
+        let input = "@foo bar { @baz; }";
+        let tts = lexer().parse(input).unwrap();
+        let result = parser()
+            .parse((&tts).spanned(Span::splat(tts.len())))
+            .into_result();
+        assert_eq!(
+            result,
+            Ok((
+                Stylesheet {
+                    items: vec![(
+                        Item::AtRule(AtRule::Generic(GenericAtRule {
+                            name: "foo",
+                            prelude: &[
+                                (TokenTree::Token(Token::Whitespace), Span::new(4, 5)),
+                                (TokenTree::Token(Token::Ident("bar")), Span::new(5, 8)),
+                                (TokenTree::Token(Token::Whitespace), Span::new(8, 9)),
+                            ],
+                            block: Some(vec![(
+                                Item::AtRule(AtRule::Generic(GenericAtRule {
+                                    name: "baz",
+                                    prelude: &[],
+                                    block: None,
+                                })),
+                                Span::new(11, 16)
+                            )]),
+                        })),
+                        Span::new(0, 18)
+                    )]
+                },
+                Span::new(0, input.len())
+            ))
         );
     }
 
     #[test]
-    fn test_declaration() {
-        assert_parse_ok!(
-            "foo: bar;",
-            Item::Declaration {
-                name: vec![TokenTree::Token(Token::Ident("foo".into()))],
-                value: vec![TokenTree::Token(Token::Ident("bar".into()))],
-                important: false,
-            }
-        );
-
-        assert_parse_ok!(
-            "foo: bar !important;",
-            Item::Declaration {
-                name: vec![TokenTree::Token(Token::Ident("foo".into()))],
-                value: vec![TokenTree::Token(Token::Ident("bar".into()))],
-                important: true,
-            }
+    fn test_item_variable_declaration() {
+        // Parse a variable declaration
+        let input = "@foo: bar;";
+        let tts = lexer().parse(input).unwrap();
+        let result = parser()
+            .parse((&tts).spanned(Span::splat(tts.len())))
+            .into_result();
+        assert_eq!(
+            result,
+            Ok((
+                Stylesheet {
+                    items: vec![(
+                        Item::Declaration(Declaration {
+                            name: DeclarationName::Variable("foo"),
+                            value: &[(TokenTree::Token(Token::Ident("bar")), Span::new(6, 9))],
+                            important: false,
+                        }),
+                        Span::new(0, 10)
+                    )]
+                },
+                Span::new(0, input.len())
+            ))
         );
     }
 
     #[test]
-    fn test_mixin_call() {
-        assert_parse_ok!(
-            ".foo(bar, baz);",
-            Item::MixinCall {
-                selector: vec![TokenTree::Token(Token::Ident("foo".into()))],
-                arguments: vec![
-                    TokenTree::Token(Token::Ident("bar".into())),
-                    TokenTree::Token(Token::Symbol(',')),
-                    TokenTree::Token(Token::Whitespace),
-                    TokenTree::Token(Token::Ident("baz".into())),
-                ],
-            }
+    fn test_item_declaration() {
+        // Parse a declaration
+        let input = "foo: bar;";
+        let tts = lexer().parse(input).unwrap();
+        let result = parser()
+            .parse((&tts).spanned(Span::splat(tts.len())))
+            .into_result();
+        assert_eq!(
+            result,
+            Ok((
+                Stylesheet {
+                    items: vec![(
+                        Item::Declaration(Declaration {
+                            name: DeclarationName::Ident("foo"),
+                            value: &[(TokenTree::Token(Token::Ident("bar")), Span::new(5, 8))],
+                            important: false,
+                        }),
+                        Span::new(0, 9)
+                    )]
+                },
+                Span::new(0, input.len())
+            ))
         );
 
-        assert_parse_ok!(
-            "#namespace.foo(bar, baz)",
-            Item::MixinCall {
-                selector: vec![
-                    TokenTree::Token(Token::Hash("namespace".into())),
-                    TokenTree::Token(Token::Symbol('.')),
-                    TokenTree::Token(Token::Ident("foo".into())),
-                ],
-                arguments: vec![
-                    TokenTree::Token(Token::Ident("bar".into())),
-                    TokenTree::Token(Token::Symbol(',')),
-                    TokenTree::Token(Token::Whitespace),
-                    TokenTree::Token(Token::Ident("baz".into())),
-                ],
-            }
+        // Parse a declaration with important
+        let input = "foo: bar !important;";
+        let tts = lexer().parse(input).unwrap();
+        let result = parser()
+            .parse((&tts).spanned(Span::splat(tts.len())))
+            .into_result();
+        assert_eq!(
+            result,
+            Ok((
+                Stylesheet {
+                    items: vec![(
+                        Item::Declaration(Declaration {
+                            name: DeclarationName::Ident("foo"),
+                            value: &[(TokenTree::Token(Token::Ident("bar")), Span::new(5, 8))],
+                            important: true,
+                        }),
+                        Span::new(0, 20)
+                    )]
+                },
+                Span::new(0, input.len())
+            ))
+        );
+    }
+
+    #[test]
+    fn test_item_qualified_rule() {
+        // Parse a qualified rule
+        let input = "foo { bar: baz; }";
+        let tts = lexer().parse(input).unwrap();
+        let result = parser()
+            .parse((&tts).spanned(Span::splat(tts.len())))
+            .into_result();
+        assert_eq!(
+            result,
+            Ok((
+                Stylesheet {
+                    items: vec![(
+                        Item::QualifiedRule(QualifiedRule::Generic(GenericRule {
+                            prelude: &[
+                                (TokenTree::Token(Token::Ident("foo")), Span::new(0, 3)),
+                                (TokenTree::Token(Token::Whitespace), Span::new(3, 4)),
+                            ],
+                            block: vec![(
+                                Item::Declaration(Declaration {
+                                    name: DeclarationName::Ident("bar"),
+                                    value: &[(
+                                        TokenTree::Token(Token::Ident("baz")),
+                                        Span::new(11, 14)
+                                    )],
+                                    important: false,
+                                }),
+                                Span::new(6, 15)
+                            )],
+                        })),
+                        Span::new(0, 17)
+                    )]
+                },
+                Span::new(0, input.len())
+            ))
+        );
+    }
+
+    #[test]
+    fn test_item_call() {
+        // Parse a mixin call
+        let input = ".foo(@arg: blue);";
+        let tts = lexer().parse(input).unwrap();
+        let result = parser()
+            .parse((&tts).spanned(Span::splat(tts.len())))
+            .into_result();
+        assert_eq!(
+            result,
+            Ok((
+                Stylesheet {
+                    items: vec![(
+                        Item::Call(Call::Mixin(MixinCall {
+                            selector: &[
+                                (TokenTree::Token(Token::Symbol('.')), Span::new(0, 1)),
+                                (TokenTree::Token(Token::Ident("foo")), Span::new(1, 4))
+                            ],
+                            arguments: &[
+                                (TokenTree::Token(Token::Symbol('@')), Span::new(5, 6)),
+                                (TokenTree::Token(Token::Ident("arg")), Span::new(6, 9)),
+                                (TokenTree::Token(Token::Symbol(':')), Span::new(9, 10)),
+                                (TokenTree::Token(Token::Whitespace), Span::new(10, 11)),
+                                (TokenTree::Token(Token::Ident("blue")), Span::new(11, 15)),
+                            ],
+                        })),
+                        Span::new(0, 17)
+                    )]
+                },
+                Span::new(0, input.len())
+            ))
+        );
+
+        // Parse a variable call
+        let input = "@foo();";
+        let tts = lexer().parse(input).unwrap();
+        let result = parser()
+            .parse((&tts).spanned(Span::splat(tts.len())))
+            .into_result();
+        assert_eq!(
+            result,
+            Ok((
+                Stylesheet {
+                    items: vec![(
+                        Item::Call(Call::Variable(VariableCall {
+                            name: "foo",
+                            _lookups: PhantomData,
+                        })),
+                        Span::new(0, 7)
+                    )]
+                },
+                Span::new(0, input.len())
+            ))
+        );
+
+        // Parse a function call
+        let input = "foo();";
+        let tts = lexer().parse(input).unwrap();
+        let result = parser()
+            .parse((&tts).spanned(Span::splat(tts.len())))
+            .into_result();
+        assert_eq!(
+            result,
+            Ok((
+                Stylesheet {
+                    items: vec![(
+                        Item::Call(Call::Function(FunctionCall {
+                            name: "foo",
+                            arguments: &[],
+                        })),
+                        Span::new(0, 6)
+                    )]
+                },
+                Span::new(0, input.len())
+            ))
         );
     }
 }
