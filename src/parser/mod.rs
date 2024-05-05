@@ -45,60 +45,23 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
         // Parse a rule's block
         let rule_block = list_of_items.nested_in(tree(Delim::Brace));
 
-        // Parse a variable declaration
-        let item_variable_declaration = {
+        // Parse a Declaration
+        let declaration = {
+            let declaration_name = choice((
+                ident.map(DeclarationName::Ident),
+                at_ident.map(DeclarationName::Variable),
+                // TODO: Support LESS interpolation in declaration names
+            ));
+
+            // Parse component values up to a semicolon or eof
+            let declaration_value = any().and_is(symbol(';').not()).repeated().to_slice();
+
             group((
-                at_ident.then_ignore(junk.or_not()).then_ignore(symbol(':')),
-                // Parse component values up to a semicolon or eof
-                any().and_is(symbol(';').not()).repeated().to_slice(),
-                choice((symbol(';'), end())),
-            ))
-            .map(|(name, value, _)| Item::VariableDeclaration { name, value })
-        };
-
-        // let item_variable_call = todo();
-
-        // Parse an at-rule
-        let item_at_rule = {
-            let item_at_rule_end = select_ref!(
-                TokenTree::Token(Token::Symbol(';')) => (),
-                TokenTree::Tree(delim, _) if delim == &Delim::Brace => ()
-            );
-            group((
-                at_ident,
-                // Parse the prelude up to eof, semicolon, or block
-                any().and_is(item_at_rule_end.not()).repeated().to_slice(),
-                // Parse the optional block
-                choice((
-                    end().to(None),
-                    symbol(';').to(None),
-                    rule_block.clone().map(Some),
-                )),
-            ))
-            .map(|(name, prelude, block)| Item::AtRule {
-                name,
-                prelude,
-                block,
-            })
-        };
-
-        // let item_mixin_rule = todo();
-        // let item_qualified_rule = todo();
-
-        // Parse a declaration
-        let item_declaration = {
-            group((
-                // Parse the declaration name
-                ident
-                    .map(DeclarationName::Literal)
-                    .then_ignore(junk.or_not())
-                    .then_ignore(symbol(':')),
-                // Parse component values up to a semicolon or eof
-                any()
-                    .and_is(symbol(';').not())
-                    .repeated()
-                    .to_slice()
-                    .then_ignore(choice((symbol(';'), end()))),
+                declaration_name
+                    .then_ignore(junk)
+                    .then_ignore(symbol(':'))
+                    .then_ignore(junk),
+                declaration_value.then_ignore(choice((symbol(';'), end()))),
             ))
             .map(|(name, mut value)| {
                 value = strip_trailing_junk(value);
@@ -122,7 +85,7 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
 
                 value = strip_trailing_junk(value);
 
-                Item::Declaration {
+                Declaration {
                     name,
                     value,
                     important,
@@ -130,16 +93,39 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
             })
         };
 
-        // let item_mixin_call = todo();
+        // Parse an AtRule
+        let at_rule = {
+            // Parse the prelude up to eof, semicolon, or block.
+            let at_rule_prelude = any()
+                .and_is(
+                    select_ref!(
+                        TokenTree::Token(Token::Symbol(';')) => (),
+                        TokenTree::Tree(delim, _) if delim == &Delim::Brace => ()
+                    )
+                    .not(),
+                )
+                .repeated()
+                .to_slice();
+
+            // Parse the end of the at-rule.
+            let at_rule_end = choice((
+                end().to(None),
+                symbol(';').to(None),
+                rule_block.clone().map(Some),
+            ));
+
+            group((at_ident, at_rule_prelude, at_rule_end)).map(|(name, prelude, block)| {
+                AtRule::Generic(GenericAtRule {
+                    name,
+                    prelude,
+                    block,
+                })
+            })
+        };
 
         let item = choice((
-            item_variable_declaration,
-            // item_variable_call,
-            item_at_rule,
-            // item_mixin_rule,
-            // item_qualified_rule,
-            item_declaration,
-            // item_mixin_call,
+            declaration.map(Item::Declaration),
+            at_rule.map(Item::AtRule),
         ))
         .map_with(|item, e| (item, e.span()));
 
@@ -175,11 +161,11 @@ mod tests {
             Ok((
                 Stylesheet {
                     items: vec![(
-                        Item::AtRule {
+                        Item::AtRule(AtRule::Generic(GenericAtRule {
                             name: "foo",
                             prelude: &[],
                             block: None,
-                        },
+                        })),
                         Span::new(0, 5)
                     )]
                 },
@@ -198,14 +184,14 @@ mod tests {
             Ok((
                 Stylesheet {
                     items: vec![(
-                        Item::AtRule {
+                        Item::AtRule(AtRule::Generic(GenericAtRule {
                             name: "foo",
                             prelude: &[
                                 (TokenTree::Token(Token::Whitespace), Span::new(4, 5)),
                                 (TokenTree::Token(Token::Ident("bar")), Span::new(5, 8))
                             ],
                             block: None,
-                        },
+                        })),
                         Span::new(0, 9)
                     )]
                 },
@@ -224,7 +210,7 @@ mod tests {
             Ok((
                 Stylesheet {
                     items: vec![(
-                        Item::AtRule {
+                        Item::AtRule(AtRule::Generic(GenericAtRule {
                             name: "foo",
                             prelude: &[
                                 (TokenTree::Token(Token::Whitespace), Span::new(4, 5)),
@@ -232,14 +218,14 @@ mod tests {
                                 (TokenTree::Token(Token::Whitespace), Span::new(8, 9)),
                             ],
                             block: Some(vec![(
-                                Item::AtRule {
+                                Item::AtRule(AtRule::Generic(GenericAtRule {
                                     name: "baz",
                                     prelude: &[],
                                     block: None,
-                                },
+                                })),
                                 Span::new(11, 16)
                             )]),
-                        },
+                        })),
                         Span::new(0, 18)
                     )]
                 },
@@ -261,13 +247,11 @@ mod tests {
             Ok((
                 Stylesheet {
                     items: vec![(
-                        Item::VariableDeclaration {
-                            name: "foo",
-                            value: &[
-                                (TokenTree::Token(Token::Whitespace), Span::new(5, 6)),
-                                (TokenTree::Token(Token::Ident("bar")), Span::new(6, 9))
-                            ],
-                        },
+                        Item::Declaration(Declaration {
+                            name: DeclarationName::Variable("foo"),
+                            value: &[(TokenTree::Token(Token::Ident("bar")), Span::new(6, 9))],
+                            important: false,
+                        }),
                         Span::new(0, 10)
                     )]
                 },
@@ -289,14 +273,11 @@ mod tests {
             Ok((
                 Stylesheet {
                     items: vec![(
-                        Item::Declaration {
-                            name: DeclarationName::Literal("foo"),
-                            value: &[
-                                (TokenTree::Token(Token::Whitespace), Span::new(4, 5)),
-                                (TokenTree::Token(Token::Ident("bar")), Span::new(5, 8))
-                            ],
+                        Item::Declaration(Declaration {
+                            name: DeclarationName::Ident("foo"),
+                            value: &[(TokenTree::Token(Token::Ident("bar")), Span::new(5, 8))],
                             important: false,
-                        },
+                        }),
                         Span::new(0, 9)
                     )]
                 },
@@ -315,14 +296,11 @@ mod tests {
             Ok((
                 Stylesheet {
                     items: vec![(
-                        Item::Declaration {
-                            name: DeclarationName::Literal("foo"),
-                            value: &[
-                                (TokenTree::Token(Token::Whitespace), Span::new(4, 5)),
-                                (TokenTree::Token(Token::Ident("bar")), Span::new(5, 8))
-                            ],
+                        Item::Declaration(Declaration {
+                            name: DeclarationName::Ident("foo"),
+                            value: &[(TokenTree::Token(Token::Ident("bar")), Span::new(5, 8))],
                             important: true,
-                        },
+                        }),
                         Span::new(0, 20)
                     )]
                 },
