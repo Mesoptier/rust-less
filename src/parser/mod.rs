@@ -87,6 +87,7 @@ pub fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
             .allow_leading()
             .allow_trailing()
             .collect()
+            .map(ListOfItems)
     });
 
     // A stylesheet is just a list of items
@@ -98,7 +99,7 @@ fn at_rule<'tokens, 'src: 'tokens>(
     rule_block: impl Parser<
             'tokens,
             ParserInput<'tokens, 'src>,
-            Vec<Spanned<Item<'tokens, 'src>>>,
+            ListOfItems<'tokens, 'src>,
             ParserExtra<'tokens, 'src>,
         > + Clone,
 ) -> impl Parser<
@@ -136,7 +137,7 @@ fn qualified_rule<'tokens, 'src: 'tokens>(
     rule_block: impl Parser<
             'tokens,
             ParserInput<'tokens, 'src>,
-            Vec<Spanned<Item<'tokens, 'src>>>,
+            ListOfItems<'tokens, 'src>,
             ParserExtra<'tokens, 'src>,
         > + Clone,
 ) -> impl Parser<
@@ -287,14 +288,14 @@ mod tests {
             result,
             Ok((
                 Stylesheet {
-                    items: vec![(
+                    items: ListOfItems(vec![(
                         Item::AtRule(AtRule::Generic(GenericAtRule {
                             name: "foo",
                             prelude: &[],
                             block: None,
                         })),
                         Span::new(0, 5)
-                    )]
+                    )])
                 },
                 Span::new(0, input.len())
             ))
@@ -310,7 +311,7 @@ mod tests {
             result,
             Ok((
                 Stylesheet {
-                    items: vec![(
+                    items: ListOfItems(vec![(
                         Item::AtRule(AtRule::Generic(GenericAtRule {
                             name: "foo",
                             prelude: &[
@@ -320,7 +321,7 @@ mod tests {
                             block: None,
                         })),
                         Span::new(0, 9)
-                    )]
+                    )])
                 },
                 Span::new(0, input.len())
             ))
@@ -336,7 +337,7 @@ mod tests {
             result,
             Ok((
                 Stylesheet {
-                    items: vec![(
+                    items: ListOfItems(vec![(
                         Item::AtRule(AtRule::Generic(GenericAtRule {
                             name: "foo",
                             prelude: &[
@@ -344,17 +345,17 @@ mod tests {
                                 (TokenTree::Token(Token::Ident("bar")), Span::new(5, 8)),
                                 (TokenTree::Token(Token::Whitespace), Span::new(8, 9)),
                             ],
-                            block: Some(vec![(
+                            block: Some(ListOfItems(vec![(
                                 Item::AtRule(AtRule::Generic(GenericAtRule {
                                     name: "baz",
                                     prelude: &[],
                                     block: None,
                                 })),
                                 Span::new(11, 16)
-                            )]),
+                            )])),
                         })),
                         Span::new(0, 18)
-                    )]
+                    )])
                 },
                 Span::new(0, input.len())
             ))
@@ -373,14 +374,14 @@ mod tests {
             result,
             Ok((
                 Stylesheet {
-                    items: vec![(
+                    items: ListOfItems(vec![(
                         Item::Declaration(Declaration {
                             name: DeclarationName::Variable("foo"),
                             value: &[(TokenTree::Token(Token::Ident("bar")), Span::new(6, 9))],
                             important: false,
                         }),
                         Span::new(0, 10)
-                    )]
+                    )])
                 },
                 Span::new(0, input.len())
             ))
@@ -399,14 +400,14 @@ mod tests {
             result,
             Ok((
                 Stylesheet {
-                    items: vec![(
+                    items: ListOfItems(vec![(
                         Item::Declaration(Declaration {
                             name: DeclarationName::Ident("foo"),
                             value: &[(TokenTree::Token(Token::Ident("bar")), Span::new(5, 8))],
                             important: false,
                         }),
                         Span::new(0, 9)
-                    )]
+                    )])
                 },
                 Span::new(0, input.len())
             ))
@@ -422,14 +423,14 @@ mod tests {
             result,
             Ok((
                 Stylesheet {
-                    items: vec![(
+                    items: ListOfItems(vec![(
                         Item::Declaration(Declaration {
                             name: DeclarationName::Ident("foo"),
                             value: &[(TokenTree::Token(Token::Ident("bar")), Span::new(5, 8))],
                             important: true,
                         }),
                         Span::new(0, 20)
-                    )]
+                    )])
                 },
                 Span::new(0, input.len())
             ))
@@ -448,13 +449,13 @@ mod tests {
             result,
             Ok((
                 Stylesheet {
-                    items: vec![(
+                    items: ListOfItems(vec![(
                         Item::QualifiedRule(QualifiedRule::Generic(GenericRule {
                             prelude: &[
                                 (TokenTree::Token(Token::Ident("foo")), Span::new(0, 3)),
                                 (TokenTree::Token(Token::Whitespace), Span::new(3, 4)),
                             ],
-                            block: vec![(
+                            block: ListOfItems(vec![(
                                 Item::Declaration(Declaration {
                                     name: DeclarationName::Ident("bar"),
                                     value: &[(
@@ -464,10 +465,10 @@ mod tests {
                                     important: false,
                                 }),
                                 Span::new(6, 15)
-                            )],
+                            )]),
                         })),
                         Span::new(0, 17)
-                    )]
+                    )])
                 },
                 Span::new(0, input.len())
             ))
@@ -486,7 +487,7 @@ mod tests {
             result,
             Ok((
                 Stylesheet {
-                    items: vec![(
+                    items: ListOfItems(vec![(
                         Item::Call(Call::Mixin(MixinCall {
                             selector: &[
                                 (TokenTree::Token(Token::Symbol('.')), Span::new(0, 1)),
@@ -501,7 +502,7 @@ mod tests {
                             ],
                         })),
                         Span::new(0, 17)
-                    )]
+                    )])
                 },
                 Span::new(0, input.len())
             ))
@@ -517,13 +518,13 @@ mod tests {
             result,
             Ok((
                 Stylesheet {
-                    items: vec![(
+                    items: ListOfItems(vec![(
                         Item::Call(Call::Variable(VariableCall {
                             name: "foo",
                             _lookups: PhantomData,
                         })),
                         Span::new(0, 7)
-                    )]
+                    )])
                 },
                 Span::new(0, input.len())
             ))
@@ -539,13 +540,13 @@ mod tests {
             result,
             Ok((
                 Stylesheet {
-                    items: vec![(
+                    items: ListOfItems(vec![(
                         Item::Call(Call::Function(FunctionCall {
                             name: "foo",
                             arguments: &[],
                         })),
                         Span::new(0, 6)
-                    )]
+                    )])
                 },
                 Span::new(0, input.len())
             ))

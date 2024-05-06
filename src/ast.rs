@@ -4,8 +4,11 @@ use crate::lexer::{Spanned, TokenTree};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Stylesheet<'tokens, 'src> {
-    pub items: Vec<Spanned<Item<'tokens, 'src>>>,
+    pub items: ListOfItems<'tokens, 'src>,
 }
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ListOfItems<'tokens, 'src>(pub Vec<Spanned<Item<'tokens, 'src>>>);
 
 /// Items:
 ///  - [`AtRule`]
@@ -47,7 +50,7 @@ pub struct GenericAtRule<'tokens, 'src> {
     pub name: &'src str,
     // TODO: Support LESS interpolation in prelude.
     pub prelude: &'tokens [Spanned<TokenTree<'src>>],
-    pub block: Option<Vec<Spanned<Item<'tokens, 'src>>>>,
+    pub block: Option<ListOfItems<'tokens, 'src>>,
 }
 
 // QUALIFIED RULES
@@ -63,7 +66,7 @@ pub enum QualifiedRule<'tokens, 'src> {
 pub struct GenericRule<'tokens, 'src> {
     // TODO: Support LESS interpolation in prelude? We certainly don't want to do so for MixinRules.
     pub prelude: &'tokens [Spanned<TokenTree<'src>>],
-    pub block: Vec<Spanned<Item<'tokens, 'src>>>,
+    pub block: ListOfItems<'tokens, 'src>,
 }
 
 // TODO: Placeholder type
@@ -73,7 +76,7 @@ type Guard<'tokens, 'src> = &'tokens [Spanned<TokenTree<'src>>];
 pub struct StyleRule<'tokens, 'src> {
     pub selectors: &'tokens [Spanned<TokenTree<'src>>],
     pub guard: Option<Guard<'tokens, 'src>>,
-    pub block: Vec<Spanned<Item<'tokens, 'src>>>,
+    pub block: ListOfItems<'tokens, 'src>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -81,7 +84,7 @@ pub struct MixinRule<'tokens, 'src> {
     pub name: &'src str,
     pub arguments: &'tokens [Spanned<TokenTree<'src>>],
     pub guard: Option<Guard<'tokens, 'src>>,
-    pub block: Vec<Spanned<Item<'tokens, 'src>>>,
+    pub block: ListOfItems<'tokens, 'src>,
 }
 
 // DECLARATIONS
