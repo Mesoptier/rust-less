@@ -10,6 +10,9 @@ pub struct Stylesheet<'tokens, 'src> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ListOfItems<'tokens, 'src>(pub Vec<Spanned<Item<'tokens, 'src>>>);
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ListOfComponentValues<'tokens, 'src>(pub &'tokens [Spanned<TokenTree<'src>>]);
+
 /// Items:
 ///  - [`AtRule`]
 ///      - [`MediaAtRule`] (e.g. `@media screen and (min-width: 480px) { color: blue; }`)
@@ -49,7 +52,7 @@ pub enum AtRule<'tokens, 'src> {
 pub struct GenericAtRule<'tokens, 'src> {
     pub name: &'src str,
     // TODO: Support LESS interpolation in prelude.
-    pub prelude: &'tokens [Spanned<TokenTree<'src>>],
+    pub prelude: ListOfComponentValues<'tokens, 'src>,
     pub block: Option<ListOfItems<'tokens, 'src>>,
 }
 
@@ -65,16 +68,16 @@ pub enum QualifiedRule<'tokens, 'src> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct GenericRule<'tokens, 'src> {
     // TODO: Support LESS interpolation in prelude? We certainly don't want to do so for MixinRules.
-    pub prelude: &'tokens [Spanned<TokenTree<'src>>],
+    pub prelude: ListOfComponentValues<'tokens, 'src>,
     pub block: ListOfItems<'tokens, 'src>,
 }
 
 // TODO: Placeholder type
-type Guard<'tokens, 'src> = &'tokens [Spanned<TokenTree<'src>>];
+type Guard<'tokens, 'src> = ListOfComponentValues<'tokens, 'src>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct StyleRule<'tokens, 'src> {
-    pub selectors: &'tokens [Spanned<TokenTree<'src>>],
+    pub selectors: ListOfComponentValues<'tokens, 'src>,
     pub guard: Option<Guard<'tokens, 'src>>,
     pub block: ListOfItems<'tokens, 'src>,
 }
@@ -82,7 +85,7 @@ pub struct StyleRule<'tokens, 'src> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct MixinRule<'tokens, 'src> {
     pub name: &'src str,
-    pub arguments: &'tokens [Spanned<TokenTree<'src>>],
+    pub arguments: ListOfComponentValues<'tokens, 'src>,
     pub guard: Option<Guard<'tokens, 'src>>,
     pub block: ListOfItems<'tokens, 'src>,
 }
@@ -92,14 +95,14 @@ pub struct MixinRule<'tokens, 'src> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Declaration<'tokens, 'src> {
     pub name: DeclarationName<'tokens, 'src>,
-    pub value: &'tokens [Spanned<TokenTree<'src>>],
+    pub value: ListOfComponentValues<'tokens, 'src>,
     pub important: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum DeclarationName<'tokens, 'src> {
     Ident(&'src str),
-    InterpolatedIdent(&'tokens [Spanned<TokenTree<'src>>]),
+    InterpolatedIdent(ListOfComponentValues<'tokens, 'src>),
     Variable(&'src str),
 }
 
@@ -114,8 +117,8 @@ pub enum Call<'tokens, 'src> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MixinCall<'tokens, 'src> {
-    pub selector: &'tokens [Spanned<TokenTree<'src>>],
-    pub arguments: &'tokens [Spanned<TokenTree<'src>>],
+    pub selector: ListOfComponentValues<'tokens, 'src>,
+    pub arguments: ListOfComponentValues<'tokens, 'src>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -128,5 +131,5 @@ pub struct VariableCall<'tokens, 'src> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct FunctionCall<'tokens, 'src> {
     pub name: &'src str,
-    pub arguments: &'tokens [Spanned<TokenTree<'src>>],
+    pub arguments: ListOfComponentValues<'tokens, 'src>,
 }

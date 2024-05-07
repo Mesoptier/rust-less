@@ -118,7 +118,8 @@ fn at_rule<'tokens, 'src: 'tokens>(
             .not(),
         )
         .repeated()
-        .to_slice();
+        .to_slice()
+        .map(ListOfComponentValues);
 
     // Parse the end of the at-rule.
     let at_rule_end = choice((end().to(None), symbol(';').to(None), rule_block.map(Some)));
@@ -157,7 +158,8 @@ fn qualified_rule<'tokens, 'src: 'tokens>(
             .not(),
         )
         .repeated()
-        .to_slice();
+        .to_slice()
+        .map(ListOfComponentValues);
 
     group((
         qualified_rule_prelude,
@@ -181,7 +183,11 @@ fn declaration<'tokens, 'src: 'tokens>() -> impl Parser<
     ));
 
     // Parse component values up to a semicolon or eof
-    let declaration_value = any().and_is(symbol(';').not()).repeated().to_slice();
+    let declaration_value = any()
+        .and_is(symbol(';').not())
+        .repeated()
+        .to_slice()
+        .map(ListOfComponentValues);
 
     group((
         declaration_name
@@ -191,11 +197,12 @@ fn declaration<'tokens, 'src: 'tokens>() -> impl Parser<
         declaration_value.then_ignore(choice((symbol(';'), end()))),
     ))
     .map(|(name, mut value)| {
-        value = strip_trailing_junk(value);
+        value.0 = strip_trailing_junk(value.0);
 
         // Split off the !important flag
         let important = {
             value
+                .0
                 .split_last_chunk::<2>()
                 .filter(|(_, chunk)| {
                     matches!(
@@ -206,11 +213,11 @@ fn declaration<'tokens, 'src: 'tokens>() -> impl Parser<
                         ]
                     )
                 })
-                .inspect(|(rest_value, _)| value = rest_value)
+                .inspect(|(rest_value, _)| value.0 = rest_value)
                 .is_some()
         };
 
-        value = strip_trailing_junk(value);
+        value.0 = strip_trailing_junk(value.0);
 
         Declaration {
             name,
@@ -229,10 +236,14 @@ fn call<'tokens, 'src: 'tokens>(
     // Parse a MixinCall
     let mixin_call = {
         // TODO: Support namespaced selectors (e.g. `.foo.bar` or `#foo > .bar`).
-        let mixin_call_selector = symbol('.').then(ident()).to_slice();
+        let mixin_call_selector = symbol('.')
+            .then(ident())
+            .to_slice()
+            .map(ListOfComponentValues);
         // TODO: Parse mixin arguments
         let mixin_call_arguments =
-            select_ref!(TokenTree::Tree(Delim::Paren, tts) => tts.as_slice());
+            select_ref!(TokenTree::Tree(Delim::Paren, tts) => tts.as_slice())
+                .map(ListOfComponentValues);
         group((
             mixin_call_selector,
             mixin_call_arguments.then_ignore(call_end),
@@ -255,7 +266,9 @@ fn call<'tokens, 'src: 'tokens>(
     // Parse a FunctionCall
     let function_call = group((
         ident(),
-        select_ref!(TokenTree::Tree(Delim::Paren, tts) => tts.as_slice()).then_ignore(call_end),
+        select_ref!(TokenTree::Tree(Delim::Paren, tts) => tts.as_slice())
+            .map(ListOfComponentValues)
+            .then_ignore(call_end),
     ))
     .map(|(name, arguments)| FunctionCall { name, arguments });
 
@@ -291,7 +304,7 @@ mod tests {
                     items: ListOfItems(vec![(
                         Item::AtRule(AtRule::Generic(GenericAtRule {
                             name: "foo",
-                            prelude: &[],
+                            prelude: ListOfComponentValues(&[]),
                             block: None,
                         })),
                         Span::new(0, 5)
@@ -314,10 +327,10 @@ mod tests {
                     items: ListOfItems(vec![(
                         Item::AtRule(AtRule::Generic(GenericAtRule {
                             name: "foo",
-                            prelude: &[
+                            prelude: ListOfComponentValues(&[
                                 (TokenTree::Token(Token::Whitespace), Span::new(4, 5)),
                                 (TokenTree::Token(Token::Ident("bar")), Span::new(5, 8))
-                            ],
+                            ]),
                             block: None,
                         })),
                         Span::new(0, 9)
@@ -340,15 +353,15 @@ mod tests {
                     items: ListOfItems(vec![(
                         Item::AtRule(AtRule::Generic(GenericAtRule {
                             name: "foo",
-                            prelude: &[
+                            prelude: ListOfComponentValues(&[
                                 (TokenTree::Token(Token::Whitespace), Span::new(4, 5)),
                                 (TokenTree::Token(Token::Ident("bar")), Span::new(5, 8)),
                                 (TokenTree::Token(Token::Whitespace), Span::new(8, 9)),
-                            ],
+                            ]),
                             block: Some(ListOfItems(vec![(
                                 Item::AtRule(AtRule::Generic(GenericAtRule {
                                     name: "baz",
-                                    prelude: &[],
+                                    prelude: ListOfComponentValues(&[]),
                                     block: None,
                                 })),
                                 Span::new(11, 16)
@@ -377,7 +390,10 @@ mod tests {
                     items: ListOfItems(vec![(
                         Item::Declaration(Declaration {
                             name: DeclarationName::Variable("foo"),
-                            value: &[(TokenTree::Token(Token::Ident("bar")), Span::new(6, 9))],
+                            value: ListOfComponentValues(&[(
+                                TokenTree::Token(Token::Ident("bar")),
+                                Span::new(6, 9)
+                            )]),
                             important: false,
                         }),
                         Span::new(0, 10)
@@ -403,7 +419,10 @@ mod tests {
                     items: ListOfItems(vec![(
                         Item::Declaration(Declaration {
                             name: DeclarationName::Ident("foo"),
-                            value: &[(TokenTree::Token(Token::Ident("bar")), Span::new(5, 8))],
+                            value: ListOfComponentValues(&[(
+                                TokenTree::Token(Token::Ident("bar")),
+                                Span::new(5, 8)
+                            )]),
                             important: false,
                         }),
                         Span::new(0, 9)
@@ -426,7 +445,10 @@ mod tests {
                     items: ListOfItems(vec![(
                         Item::Declaration(Declaration {
                             name: DeclarationName::Ident("foo"),
-                            value: &[(TokenTree::Token(Token::Ident("bar")), Span::new(5, 8))],
+                            value: ListOfComponentValues(&[(
+                                TokenTree::Token(Token::Ident("bar")),
+                                Span::new(5, 8)
+                            )]),
                             important: true,
                         }),
                         Span::new(0, 20)
@@ -451,17 +473,17 @@ mod tests {
                 Stylesheet {
                     items: ListOfItems(vec![(
                         Item::QualifiedRule(QualifiedRule::Generic(GenericRule {
-                            prelude: &[
+                            prelude: ListOfComponentValues(&[
                                 (TokenTree::Token(Token::Ident("foo")), Span::new(0, 3)),
                                 (TokenTree::Token(Token::Whitespace), Span::new(3, 4)),
-                            ],
+                            ]),
                             block: ListOfItems(vec![(
                                 Item::Declaration(Declaration {
                                     name: DeclarationName::Ident("bar"),
-                                    value: &[(
+                                    value: ListOfComponentValues(&[(
                                         TokenTree::Token(Token::Ident("baz")),
                                         Span::new(11, 14)
-                                    )],
+                                    )]),
                                     important: false,
                                 }),
                                 Span::new(6, 15)
@@ -489,17 +511,17 @@ mod tests {
                 Stylesheet {
                     items: ListOfItems(vec![(
                         Item::Call(Call::Mixin(MixinCall {
-                            selector: &[
+                            selector: ListOfComponentValues(&[
                                 (TokenTree::Token(Token::Symbol('.')), Span::new(0, 1)),
                                 (TokenTree::Token(Token::Ident("foo")), Span::new(1, 4))
-                            ],
-                            arguments: &[
+                            ]),
+                            arguments: ListOfComponentValues(&[
                                 (TokenTree::Token(Token::Symbol('@')), Span::new(5, 6)),
                                 (TokenTree::Token(Token::Ident("arg")), Span::new(6, 9)),
                                 (TokenTree::Token(Token::Symbol(':')), Span::new(9, 10)),
                                 (TokenTree::Token(Token::Whitespace), Span::new(10, 11)),
                                 (TokenTree::Token(Token::Ident("blue")), Span::new(11, 15)),
-                            ],
+                            ]),
                         })),
                         Span::new(0, 17)
                     )])
@@ -543,7 +565,7 @@ mod tests {
                     items: ListOfItems(vec![(
                         Item::Call(Call::Function(FunctionCall {
                             name: "foo",
-                            arguments: &[],
+                            arguments: ListOfComponentValues(&[]),
                         })),
                         Span::new(0, 6)
                     )])
